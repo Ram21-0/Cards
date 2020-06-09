@@ -1,6 +1,7 @@
 package com.example.fb1;
 
 import android.content.Context;
+import android.graphics.Color;
 import android.net.Uri;
 import android.os.Bundle;
 
@@ -89,7 +90,7 @@ public class UserFragment extends Fragment {
 
         View v = inflater.inflate(R.layout.user_turn, container, false);
 
-        Toast.makeText(v.getContext(), "User Fragment", Toast.LENGTH_SHORT).show();
+//        Toast.makeText(v.getContext(), "User Fragment", Toast.LENGTH_SHORT).show();
         yourCardsCount = v.findViewById(R.id.yourCards);
         oppCardsCount = v.findViewById(R.id.oppCards);
 
@@ -252,6 +253,16 @@ public class UserFragment extends Fragment {
     private void onResult(final String battle) {
         checkList.setVisibility(View.GONE);
         result.setVisibility(View.VISIBLE);
+        switch (battle) {
+            case "YOU WON!!!":
+                result.setTextColor(Color.GREEN);
+                break;
+            case "YOU LOST!!!":
+                result.setTextColor(Color.RED);
+                break;
+            default:
+                result.setTextColor(Color.WHITE);
+        }
         result.setText(battle);
         viewOpponent.setVisibility(View.VISIBLE);
         getActivity().findViewById(R.id.Continue).setVisibility(View.VISIBLE);

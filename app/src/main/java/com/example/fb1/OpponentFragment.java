@@ -1,6 +1,7 @@
 package com.example.fb1;
 
 import android.content.Context;
+import android.graphics.Color;
 import android.net.Uri;
 import android.os.Bundle;
 import android.view.LayoutInflater;
@@ -151,6 +152,16 @@ public class OpponentFragment extends Fragment {
 
     private void onResult(final String battle) {
         result.setVisibility(View.VISIBLE);
+        switch (battle) {
+            case "YOU WON!!!":
+                result.setTextColor(Color.GREEN);
+                break;
+            case "YOU LOST!!!":
+                result.setTextColor(Color.RED);
+                break;
+            default:
+                result.setTextColor(Color.WHITE);
+        }
         result.setText(battle);
         viewOpponent.setVisibility(View.VISIBLE);
 

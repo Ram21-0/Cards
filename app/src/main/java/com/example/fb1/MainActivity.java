@@ -16,16 +16,17 @@ public class MainActivity extends AppCompatActivity {
     protected void onCreate(@Nullable Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
         setContentView(R.layout.main);
+
         exhibition = findViewById(R.id.exhibition);
         start = findViewById(R.id.start);
         login = findViewById(R.id.login);
 
-        if (Data.list.isEmpty()) {
-            exhibition.setVisibility(View.GONE);
-            start.setVisibility(View.GONE);
-            login.setVisibility(View.GONE);
-            Data.list = Data.newList();
-        }
+//        if (Data.list.isEmpty()) {
+//            exhibition.setVisibility(View.GONE);
+//            start.setVisibility(View.GONE);
+//            login.setVisibility(View.GONE);
+//            Data.list = Data.newList();
+//        }
 
         exhibition.setVisibility(View.VISIBLE);
         start.setVisibility(View.VISIBLE);
@@ -42,6 +43,13 @@ public class MainActivity extends AppCompatActivity {
             @Override
             public void onClick(View v) {
                 startActivity(new Intent(MainActivity.this, Play.class));
+            }
+        });
+
+        login.setOnClickListener(new View.OnClickListener() {
+            @Override
+            public void onClick(View v) {
+                startActivity(new Intent(MainActivity.this, Compete.class));
             }
         });
     }
