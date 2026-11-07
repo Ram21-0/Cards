@@ -1,0 +1,10 @@
+{
+  "name": "wrestling-cards-web",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "test": "node --test",
+    "gen-cards": "node scripts/gen-cards.mjs",
+    "start": "python3 -m http.server 8081"
+  }
+}
