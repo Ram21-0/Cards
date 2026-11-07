@@ -1,0 +1,11 @@
+spring:
+  application:
+    name: cards-backend
+  config:
+    # Loads KEY=value lines from app/backend/.env if the file exists (local dev only).
+    import: optional:file:.env[.properties]
+  flyway:
+    enabled: true
+
+server:
+  port: ${PORT:8080}
