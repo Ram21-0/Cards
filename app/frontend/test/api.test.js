@@ -159,3 +159,34 @@ test('updateMe PUTs the username; sign out and delete handle 204 (no body)', asy
   assert.equal(await signOut(), null);
   assert.equal(await deleteAccount(), null);
 });
+
+test('joinGame POSTs to the join endpoint with no body and returns the game', async () => {
+  const game = { id: 'g1', joinCode: 'K7Q2XM', maxPlayers: 3, deck: { id: 'd', name: 'W' }, seats: [{ seat: 1, kind: 'HUMAN', username: 'ann' }, { seat: 2, kind: 'HUMAN', username: 'bob' }] };
+  const calls = mockFetch(200, game);
+  const { joinGame } = await import('../js/api.js');
+  assert.deepEqual(await joinGame('k7q2xm'), game);
+  assert.match(calls[0].url, /\/api\/games\/k7q2xm\/join$/);
+  assert.equal(calls[0].init.method, 'POST');
+  assert.equal(calls[0].init.body, undefined);
+  assert.equal(calls[0].init.credentials, 'include');
+  assert.equal(calls[0].init.headers['X-Requested-With'], 'cards');
+});
+
+test('join errors keep the server message and status (full / started / username / signed out)', async () => {
+  const { joinGame } = await import('../js/api.js');
+  for (const [status, error] of [[409, 'Game is full'], [409, 'Game has already started'], [400, 'Choose a username first'], [401, 'Sign in required'], [404, 'Game ZZZZZZ not found']]) {
+    mockFetch(status, { error });
+    await assert.rejects(() => joinGame('ZZZZZZ'), (e) => e instanceof ApiError && e.status === status && e.message === error);
+  }
+});
+
+test('an empty apiBase (bundled build) means same origin: paths stay relative', async () => {
+  const saved = globalThis.CARDS_CONFIG;
+  globalThis.CARDS_CONFIG = { apiBase: '' };
+  const fresh = await import('../js/api.js?bundle');         // re-evaluates the module with the new config
+  assert.equal(fresh.API_BASE, '');
+  const calls = mockFetch(200, {});
+  await fresh.getGame('ABC234');
+  assert.equal(calls[0].url, '/api/games/ABC234');
+  globalThis.CARDS_CONFIG = saved;
+});

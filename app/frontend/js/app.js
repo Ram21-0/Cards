@@ -1,6 +1,6 @@
 import { Game, RESULT, DIFFICULTY } from './engine.js';
 import {
-  API_BASE, ApiError, fetchDecks, fetchDeck, createGame, getGame,
+  API_BASE, ApiError, fetchDecks, fetchDeck, createGame, getGame, joinGame,
   fetchNonce, googleSignIn, fetchMe, updateMe, signOut, deleteAccount, devLogin,
 } from './api.js';
 import { offlineDeck } from './offline.js';
@@ -255,6 +255,10 @@ async function createGameFlow(d, players, button) {
       toast('Your session expired — sign in again');
       return signIn(() => deckScreen(d));
     }
+    if (e instanceof ApiError && e.status === 400 && /username/i.test(e.message)) {
+      toast(e.message);
+      return chooseUsername(() => deckScreen(d));
+    }
     toast(e instanceof ApiError ? e.message : 'Could not reach the server');
   }
 }
@@ -273,20 +277,65 @@ async function copyText(text, what) {
   toast(`${what} copied`);
 }
 
-const seatLabel = (s) => (s.kind === 'CPU' ? `CPU (${s.difficulty ?? 'normal'})` : s.username) + (s.seat === 1 ? ' · host' : '');
+/** The seat of the signed-in player in this game, if any. */
+const mySeat = (g) => (me?.username ? g.seats.find((s) => s.kind === 'HUMAN' && s.username === me.username) : undefined);
+
+const seatLabel = (s, g) => {
+  const who = s.kind === 'CPU' ? `CPU (${s.difficulty ?? 'normal'})` : s.username;
+  return who + (s.seat === 1 ? ' · host' : '') + (mySeat(g)?.seat === s.seat ? ' · you' : '');
+};
+
+async function doJoin(g, button) {
+  button.disabled = true;
+  button.textContent = 'Joining…';
+  try {
+    const joined = await joinGame(g.joinCode);
+    toast(`You joined seat ${mySeat(joined)?.seat ?? ''}`.trim());
+    lobby(joined);
+  } catch (e) {
+    button.disabled = false;
+    button.textContent = 'Join game';
+    if (e instanceof ApiError && e.status === 401) {          // session expired
+      me = null;
+      toast('Your session expired — sign in again');
+      return signIn(() => lobby(g));
+    }
+    if (e instanceof ApiError && e.status === 400 && /username/i.test(e.message)) {
+      toast(e.message);
+      return chooseUsername(() => lobby(g));
+    }
+    toast(e instanceof ApiError ? e.message : 'Could not reach the server');
+    if (e instanceof ApiError && e.status === 409) {          // full / already started: show the current state
+      try { lobby(await getGame(g.joinCode)); } catch { /* keep this screen */ }
+    }
+  }
+}
 
 function lobby(g, { host = false } = {}) {
   const link = g.joinUrl ?? `${location.origin}${location.pathname}?join=${g.joinCode}`;
   const countEl = el('h3', { class: 'section' });
   const seatsEl = el('ol', { class: 'seats', 'aria-live': 'polite' });
-  const fill = (game) => {
-    countEl.textContent = `Players · ${game.seats.length} / ${game.maxPlayers}`;
-    seatsEl.replaceChildren(...Array.from({ length: game.maxPlayers }, (_, i) => {
-      const s = game.seats.find((x) => x.seat === i + 1);
-      return el('li', { class: s ? 'taken' : 'open' }, el('span', { class: 'seat-no' }, String(i + 1)), s ? seatLabel(s) : 'Waiting for a player…');
+  const actionEl = el('div', { class: 'lobby-action' });
+  const isHost = () => host || mySeat(g)?.seat === 1;
+
+  // Seat list + the join / status area; re-run whenever the game changes.
+  const render = () => {
+    countEl.textContent = `Players · ${g.seats.length} / ${g.maxPlayers}`;
+    seatsEl.replaceChildren(...Array.from({ length: g.maxPlayers }, (_, i) => {
+      const s = g.seats.find((x) => x.seat === i + 1);
+      return el('li', { class: `${s ? 'taken' : 'open'}${s && mySeat(g)?.seat === s.seat ? ' mine' : ''}` },
+        el('span', { class: 'seat-no' }, String(i + 1)), s ? seatLabel(s, g) : 'Waiting for a player…');
     }));
+    const mine = mySeat(g);
+    const join = el('button', { class: 'btn primary wide', onclick: () => doJoin(g, join) }, 'Join game');
+    actionEl.replaceChildren(
+      mine ? el('p', { class: 'hint' }, isHost() ? 'You are the host. Share the code and wait for players.' : `You are in seat ${mine.seat}. Waiting for more players.`)
+        : !me ? el('button', { class: 'btn primary wide', onclick: () => signIn(() => lobby(g)) }, 'Sign in to join')
+        : g.seats.length >= g.maxPlayers ? el('p', { class: 'hint' }, 'This game is full.')
+        : join,
+      el('p', { class: 'hint' }, `${g.deck.name} · up to ${g.maxPlayers} players`));
   };
-  fill(g);
+  render();
 
   const leave = () => {
     const url = new URL(location.href);          // drop only ?join=, keep other query params (e.g. ?api=)
@@ -297,17 +346,14 @@ function lobby(g, { host = false } = {}) {
   show(screen('',
     el('div', { class: 'topbar' }, el('button', { class: 'btn small', onclick: leave }, '← Decks'), el('h2', {}, 'Game lobby'), el('span')),
     el('section', { class: 'panel lobby' },
-      el('p', { class: 'tagline' }, host ? 'Share this code so others can join' : `Join code for ${g.deck.name}`),
+      el('p', { class: 'tagline' }, isHost() ? 'Share this code so others can join' : `Join code for ${g.deck.name}`),
       el('div', { class: 'join-code', 'aria-label': `Join code ${g.joinCode.split('').join(' ')}` }, g.joinCode),
       el('p', { class: 'link' }, link),
       el('div', { class: 'btn-row' },
         el('button', { class: 'btn', onclick: () => copyText(g.joinCode, 'Code') }, 'Copy code'),
         el('button', { class: 'btn', onclick: () => copyText(link, 'Link') }, 'Copy link'),
         navigator.share ? el('button', { class: 'btn primary', onclick: () => navigator.share({ title: 'Join my Cards game', text: `Join my ${g.deck.name} game with code ${g.joinCode}`, url: link }).catch(() => {}) }, 'Share') : '')),
-    countEl, seatsEl,
-    !host && !me ? el('button', { class: 'btn primary wide', onclick: () => signIn(() => lobby(g, { host: false })) }, 'Sign in to join') : '',
-    el('p', { class: 'hint' }, `${g.deck.name} · up to ${g.maxPlayers} players` + (host ? '' : ' · joining a game isn’t available yet')),
-  ));
+    countEl, seatsEl, actionEl));
 
   // Keep the seat list fresh while this screen is open.
   const id = screenId;
@@ -316,7 +362,7 @@ function lobby(g, { host = false } = {}) {
     if (screenId !== id) return;
     try {
       const fresh = await getGame(g.joinCode);
-      if (screenId === id && JSON.stringify(fresh.seats) !== JSON.stringify(g.seats)) { g = fresh; fill(fresh); }
+      if (screenId === id && JSON.stringify(fresh.seats) !== JSON.stringify(g.seats)) { g = fresh; render(); }
     } catch { /* keep showing what we have */ }
     poll();
   };
@@ -331,7 +377,7 @@ function requireIdentity(next) {
   return next();
 }
 
-const isLocalApi = () => ['localhost', '127.0.0.1', '[::1]'].includes(new URL(API_BASE).hostname);
+const isLocalApi = () => ['localhost', '127.0.0.1', '[::1]'].includes(new URL(API_BASE || location.origin).hostname);   // apiBase '' = same origin (bundled build)
 
 let gsiScript = null;
 function loadGoogleScript() {

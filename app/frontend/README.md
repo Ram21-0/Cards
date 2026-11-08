@@ -40,9 +40,17 @@ Creating (and, soon, joining) a multiplayer game needs an account; solo play vs 
    If you are not signed in you are sent to sign-in first.
 3. `POST /api/games {deckId, maxPlayers}` (the host is the signed-in player) returns a `joinCode` and `joinUrl`. The **lobby** shows the code, a link, **Copy code / Copy link / Share**
    and the seat list, which refreshes every 4 s.
-4. The link is `<frontend>/?join=CODE`; opening it shows that game's lobby (`GET /api/games/{code}`) with a **Sign in to join** button when signed out. Joining as a player is not built yet.
+4. The link is `<frontend>/?join=CODE`; opening it shows that game's lobby (`GET /api/games/{code}`, public) with **Sign in to join** when signed out
+   and **Join game** when signed in (`POST /api/games/{code}/join`: lowest free seat; idempotent). The lobby marks your seat ("· you"), shows
+   "This game is full" when it is, and handles the server's errors: 401 → sign in again, 400 "Choose a username first" → username screen,
+   409 full / already started → refresh the lobby.
 
 Dev tip: open the app with `?api=http://localhost:9090` to point it at a different backend (e.g. a mock).
+
+## Production bundle (one origin)
+`mvn -Pbundle-frontend package` in `app/backend` copies this folder into the jar (without `config.js`, `test/`, `scripts/`, `package*.json`, `README.md`).
+The backend then serves `/config.js` itself as `window.CARDS_CONFIG = {"apiBase": "", "googleClientId": "…"}`, so the code must keep
+reading `CARDS_CONFIG.apiBase` (empty string = same origin) and `CARDS_CONFIG.googleClientId` — don't hard-code either.
 
 ## Card data (offline fallback only)
 `data/cards.js` holds placeholder wrestlers; `npm run gen-cards` regenerates them. Real cards live in the backend database.

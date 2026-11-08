@@ -87,6 +87,13 @@ export function mapDeck(deckJson, cardsJson) {
 export const createGame = ({ deckId, maxPlayers }) =>
   request('/api/games', { method: 'POST', body: { deckId, maxPlayers } });
 
+/**
+ * Takes the lowest free seat in a game (needs sign-in + a username). Idempotent: already seated -> same game again.
+ * ApiError 401 (signed out) / 400 (no username yet) / 404 (unknown code) / 409 ("Game is full" / "Game has already started").
+ * Resolves the same body as getGame.
+ */
+export const joinGame = (joinCode) => request(`/api/games/${encodeURIComponent(joinCode)}/join`, { method: 'POST' });
+
 /** Looks a game up by its join code (same shape as createGame). */
 export const getGame = (joinCode) => request(`/api/games/${encodeURIComponent(joinCode)}`);
 

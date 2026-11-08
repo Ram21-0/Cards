@@ -182,3 +182,7 @@ h3.section { font-size: 14px; text-transform: uppercase; letter-spacing: .08em; 
 .profile h2 { margin: 0; }
 .avatar { width: 72px; height: 72px; border-radius: 50%; object-fit: cover; border: 2px solid var(--accent); }
 .avatar.blank { display: grid; place-items: center; font-size: 30px; font-weight: 800; background: var(--bg-2); color: var(--accent); }
+
+.lobby-action { display: flex; flex-direction: column; align-items: center; gap: 8px; }
+.lobby-action .hint { margin: 0; text-align: center; }
+.seats li.mine { border-color: var(--accent); }
