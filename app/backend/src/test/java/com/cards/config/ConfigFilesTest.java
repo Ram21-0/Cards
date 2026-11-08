@@ -55,7 +55,8 @@ class ConfigFilesTest {
         CpuProfiles configured = new GameConfig().cpuProfiles(
                 p.getProperty("app.game.cpu.easy.strategy"), Double.parseDouble(p.getProperty("app.game.cpu.easy.noise")),
                 p.getProperty("app.game.cpu.medium.strategy"), Double.parseDouble(p.getProperty("app.game.cpu.medium.noise")),
-                p.getProperty("app.game.cpu.hard.strategy"), Double.parseDouble(p.getProperty("app.game.cpu.hard.noise")));
+                p.getProperty("app.game.cpu.hard.strategy"), Double.parseDouble(p.getProperty("app.game.cpu.hard.noise")),
+                p.getProperty("app.game.cpu.extreme.strategy"), Double.parseDouble(p.getProperty("app.game.cpu.extreme.noise")));
         for (DifficultyLevel level : DifficultyLevel.values()) {
             assertEquals(CpuProfiles.defaults().profile(level), configured.profile(level), level.name());
         }
@@ -66,9 +67,9 @@ class ConfigFilesTest {
     @Test
     void anInvalidCpuStrategyInConfigurationStopsStartupWithAClearMessage() {
         IllegalArgumentException e = assertThrows(IllegalArgumentException.class,
-                () -> new GameConfig().cpuProfiles("random", 0, "clever", 0, "smart", 0));
+                () -> new GameConfig().cpuProfiles("random", 0, "clever", 0, "smart", 0, "counting", 0));
         assertTrue(e.getMessage().contains("clever"));
-        assertThrows(IllegalArgumentException.class, () -> new GameConfig().cpuProfiles("random", 0, "smart", 1.5, "smart", 0));
+        assertThrows(IllegalArgumentException.class, () -> new GameConfig().cpuProfiles("random", 0, "smart", 1.5, "smart", 0, "counting", 0));
         assertThrows(IllegalArgumentException.class, () -> new GameConfig().defaultGameSettings(5, 3, 5, null));
     }
 

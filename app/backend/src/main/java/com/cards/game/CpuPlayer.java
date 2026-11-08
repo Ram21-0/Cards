@@ -5,6 +5,7 @@ import com.cards.common.DifficultyLevel;
 import com.cards.common.Outcome;
 import com.cards.common.StatDefinition;
 
+import java.util.ArrayList;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Set;
@@ -25,8 +26,18 @@ final class CpuPlayer {
      * @param ownCards  every card the CPU holds, including one it already put in play this round
      * @param opponents how many other players are in this round / clash
      * @param potSize   cards waiting in the pot (a clash or carry), part of the prize
+     * @param opponentPools for the counting strategy: for each opponent in the round, the cards their next card can be
+     *                  (empty = no card counting: every card the CPU does not hold is a candidate for everyone)
      */
-    record Situation(List<Card> ownCards, int opponents, int potSize) {
+    record Situation(List<Card> ownCards, int opponents, int potSize, List<List<Card>> opponentPools) {
+        Situation(List<Card> ownCards, int opponents, int potSize) {
+            this(ownCards, opponents, potSize, List.of());
+        }
+    }
+
+    /** Does this difficulty count cards (so the engine should work out what is known)? */
+    boolean countsCards(DifficultyLevel level) {
+        return profiles.profile(level).strategy() == CpuStrategy.COUNTING;
     }
 
     private final List<StatDefinition> stats;
@@ -84,7 +95,7 @@ final class CpuPlayer {
         CpuProfile profile = profiles.profile(level);
         if (profile.strategy() == CpuStrategy.RANDOM) return rnd.nextInt(hand.size());
         Set<Integer> own = ownIds(sit);
-        if (profile.strategy() != CpuStrategy.SMART && allHopeless(hand, statIndex, own)) {
+        if (profile.strategy() != CpuStrategy.SMART && profile.strategy() != CpuStrategy.COUNTING && allHopeless(hand, statIndex, own)) {
             return rnd.nextInt(hand.size());                  // nothing can win: the percentile strategies have no sacrifice logic, so no card is "least bad"
         }
         int best = 0;
@@ -120,7 +131,7 @@ final class CpuPlayer {
             case RANDOM -> 0;
             case DECK_PERCENTILE -> deckStrengths.of(card, statIndex);
             case OPPONENT_PERCENTILE -> pool(card, statIndex, own).beaten();
-            case SMART -> expectedValue(card, statIndex, sit, own);
+            case SMART, COUNTING -> expectedValue(profile.strategy(), card, statIndex, sit, own);
         };
     }
 
@@ -129,14 +140,33 @@ final class CpuPlayer {
      * won net (one per opponent, plus the pot). cost: the card lost, 1 plus how much a keeper it is (its best stat's
      * percentile among the cards the CPU does not hold).
      */
-    private double expectedValue(Card card, int statIndex, Situation sit, Set<Integer> own) {
-        Pool pool = pool(card, statIndex, own);
+    private double expectedValue(CpuStrategy strategy, Card card, int statIndex, Situation sit, Set<Integer> own) {
         int n = Math.max(1, sit.opponents());
+        List<Pool> pools = new ArrayList<>();
+        if (strategy == CpuStrategy.COUNTING && !sit.opponentPools().isEmpty()) {
+            for (List<Card> candidates : sit.opponentPools()) pools.add(pool(card, statIndex, candidates));
+        } else {
+            Pool shared = pool(card, statIndex, own);
+            for (int i = 0; i < n; i++) pools.add(shared);
+        }
         double prize = n + sit.potSize();
         double cost = 1 + keepValue(card, own);
-        if (pool.better() == 0 && pool.equal() > 0) return hopefulTieValue(card, sit, own, pool, n, prize, cost);
-        double p = Math.pow(pool.beatenOrTied(), n);
-        return p * prize - (1 - p) * cost;
+        double pTie = 1, pWin = 1;
+        boolean cannotWin = true;
+        for (Pool pool : pools) {
+            pTie *= pool.equal();
+            pWin *= pool.better() + 0.5 * pool.equal();
+            if (pool.better() > 0) cannotWin = false;
+        }
+        if (cannotWin && pTie > 0) return hopefulTieValue(card, sit, own, pTie, 1 - pBeatOrTie(pools), prize, cost);
+        return pWin * prize - (1 - pWin) * cost;
+    }
+
+    /** P(not beaten by anyone and tied with all): the chance that neither wins nor loses outright. */
+    private static double pBeatOrTie(List<Pool> pools) {
+        double p = 1;
+        for (Pool pool : pools) p *= pool.better() + pool.equal();
+        return p;
     }
 
     /**
@@ -146,9 +176,7 @@ final class CpuPlayer {
      * behind this one make the tie valuable, so a strong card is not given away; weak ones make it a losing bet.
      * value = P(tie) × (clashWin × clashPrize − (1 − clashWin) × clashCost) − P(lose outright) × cost
      */
-    private double hopefulTieValue(Card card, Situation sit, Set<Integer> own, Pool pool, int n, double prize, double cost) {
-        double pTie = Math.pow(pool.equal(), n);                           // nobody beats it (better = 0), all opponents tie
-        double pLose = 1 - Math.pow(pool.better() + pool.equal(), n);
+    private double hopefulTieValue(Card card, Situation sit, Set<Integer> own, double pTie, double pLose, double prize, double cost) {
         double clashWin = overallStrength(card, sit, own);
         double clashPrize = prize + 1;                                      // the clash cards are added to the pot
         double clashCost = cost + 1;                                        // a lost clash costs this card and the next
@@ -179,7 +207,7 @@ final class CpuPlayer {
     /** Noise as a share of the strategy's value range, so the same setting means the same on every scale. */
     private double noise(CpuProfile profile, Situation sit) {
         if (profile.noise() == 0 || profile.strategy() == CpuStrategy.RANDOM) return 0;
-        double range = profile.strategy() == CpuStrategy.SMART
+        double range = (profile.strategy() == CpuStrategy.SMART || profile.strategy() == CpuStrategy.COUNTING)
                 ? Math.max(1, sit.opponents()) + sit.potSize() + 2          // from -(1 + keep) up to the prize
                 : 1;
         return rnd.nextDouble() * profile.noise() * range;
@@ -209,15 +237,21 @@ final class CpuPlayer {
      * measured against them alone. An empty pool (the CPU holds everything) is neutral.
      */
     private Pool pool(Card card, int statIndex, Set<Integer> own) {
+        List<Card> unheld = new ArrayList<>();
+        for (Card other : deck) if (!own.contains(other.id())) unheld.add(other);
+        return pool(card, statIndex, unheld);
+    }
+
+    /** The same comparison against an explicit list of candidate cards (what one opponent may play). */
+    private Pool pool(Card card, int statIndex, List<Card> candidates) {
         StatDefinition stat = stats.get(statIndex);
-        int better = 0, equal = 0, size = 0;
-        for (Card other : deck) {
-            if (own.contains(other.id())) continue;
-            size++;
+        int better = 0, equal = 0;
+        for (Card other : candidates) {
             Outcome outcome = stat.compare(card.stat(stat.key()), other.stat(stat.key()));
             if (outcome == Outcome.WIN) better++;
             else if (outcome == Outcome.TIE) equal++;
         }
+        int size = candidates.size();
         return size == 0 ? new Pool(0.5, 0) : new Pool(better / (double) size, equal / (double) size);
     }
 }

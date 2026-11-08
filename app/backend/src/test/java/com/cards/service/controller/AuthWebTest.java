@@ -478,7 +478,7 @@ class AuthWebTest {
     void theErrorsOfTheLobbyActionsKeepTheirStatusCodes() throws Exception {
         when(live.start("K7Q2XM", ANN)).thenThrow(new com.cards.common.ForbiddenException("Only the host can do that"));
         when(live.addCpu("FULL11", ANN, "easy")).thenThrow(new com.cards.common.ConflictException("Game is full"));
-        when(live.addCpu("K7Q2XM", ANN, "genius")).thenThrow(new com.cards.common.BadRequestException("difficulty must be easy, medium or hard"));
+        when(live.addCpu("K7Q2XM", ANN, "genius")).thenThrow(new com.cards.common.BadRequestException("difficulty must be easy, medium, hard or extreme"));
         when(live.removeSeat("K7Q2XM", ANN, 9)).thenThrow(new com.cards.common.NotFoundException("Seat 9 is empty"));
 
         mvc.perform(post("/api/games/K7Q2XM/start").cookie(GOOD).header(HDR, "cards"))
@@ -486,7 +486,7 @@ class AuthWebTest {
         mvc.perform(post("/api/games/FULL11/cpu").cookie(GOOD).header(HDR, "cards").contentType(MediaType.APPLICATION_JSON).content("{\"difficulty\":\"easy\"}"))
                 .andExpect(status().isConflict()).andExpect(jsonPath("$.error").value("Game is full"));
         mvc.perform(post("/api/games/K7Q2XM/cpu").cookie(GOOD).header(HDR, "cards").contentType(MediaType.APPLICATION_JSON).content("{\"difficulty\":\"genius\"}"))
-                .andExpect(status().isBadRequest()).andExpect(jsonPath("$.error").value("difficulty must be easy, medium or hard"));
+                .andExpect(status().isBadRequest()).andExpect(jsonPath("$.error").value("difficulty must be easy, medium, hard or extreme"));
         mvc.perform(delete("/api/games/K7Q2XM/seats/9").cookie(GOOD).header(HDR, "cards")).andExpect(status().isNotFound());
     }
 

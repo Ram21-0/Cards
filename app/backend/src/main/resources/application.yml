@@ -19,12 +19,13 @@ app:
     max-rounds: 500
     choose-threshold: 3
     clash-call-seconds: 5
-    # How each CPU difficulty plays. strategy: random | deck-percentile | opponent-percentile | smart.
+    # How each CPU difficulty plays. strategy: random | deck-percentile | opponent-percentile | smart | counting.
     # noise (0..1) mixes random noise into the judgement; 0 = always the best option. See RULES.md §7.
     cpu:
       easy:   { strategy: random,              noise: 0 }
       medium: { strategy: opponent-percentile, noise: 0.25 }
       hard:   { strategy: smart,               noise: 0 }
+      extreme: { strategy: counting,           noise: 0 }     # smart + card counting (RULES.md §7)
   google-client-id: ${GOOGLE_CLIENT_ID:}      # empty = Google sign-in answers 503 "not configured". Put it in .env.<APP_ENV>.
   session:
     ttl-days: 30

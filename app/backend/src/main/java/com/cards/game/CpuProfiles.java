@@ -7,7 +7,7 @@ import java.util.Map;
 
 /**
  * The strategy of each difficulty. Defaults (also in application.yml, where they can be changed):
- * easy = random, medium = opponent-percentile with a little noise, hard = smart.
+ * easy = random, medium = opponent-percentile with a little noise, hard = smart, extreme = counting (smart plus card counting).
  */
 public final class CpuProfiles {
 
@@ -17,18 +17,25 @@ public final class CpuProfiles {
         this.byLevel = byLevel;
     }
 
+    /** The three classic levels; extreme plays like hard. */
     public static CpuProfiles of(CpuProfile easy, CpuProfile medium, CpuProfile hard) {
+        return of(easy, medium, hard, hard);
+    }
+
+    public static CpuProfiles of(CpuProfile easy, CpuProfile medium, CpuProfile hard, CpuProfile extreme) {
         Map<DifficultyLevel, CpuProfile> map = new EnumMap<>(DifficultyLevel.class);
         map.put(DifficultyLevel.easy, easy);
         map.put(DifficultyLevel.medium, medium);
         map.put(DifficultyLevel.hard, hard);
+        map.put(DifficultyLevel.extreme, extreme);
         return new CpuProfiles(map);
     }
 
     public static CpuProfiles defaults() {
         return of(CpuProfile.of(CpuStrategy.RANDOM, 0),
                 CpuProfile.of(CpuStrategy.OPPONENT_PERCENTILE, 0.25),
-                CpuProfile.of(CpuStrategy.SMART, 0));
+                CpuProfile.of(CpuStrategy.SMART, 0),
+                CpuProfile.of(CpuStrategy.COUNTING, 0));
     }
 
     public CpuProfile profile(DifficultyLevel level) {

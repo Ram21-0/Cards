@@ -238,6 +238,8 @@ class LiveGameIntegrationTest {
         assertEquals(1, afterHostLeft.get("seats").size());
         assertEquals(2, afterHostLeft.get("hostSeat").asInt(), "bob (seat 2) is the host now");
         call(HttpMethod.POST, "/api/games/" + code + "/cpu", bob, "{\"difficulty\":\"easy\"}", 200);
+        JsonNode withExtreme = call(HttpMethod.POST, "/api/games/" + code + "/cpu", bob, "{\"difficulty\":\"extreme\"}", 200);
+        assertEquals("extreme", withExtreme.get("seats").get(2).get("difficulty").asText(), "the database accepts the extreme level (changeset 004)");
 
         JsonNode abandoned = call(HttpMethod.POST, "/api/games/" + code + "/leave", bob, null, 200);
         assertEquals("ABANDONED", abandoned.get("status").asText());

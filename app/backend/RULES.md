@@ -52,7 +52,7 @@ When `maxRounds` is reached, the player with the **most cards** wins (cards in a
 ## 7. CPU seats
 Each difficulty (`easy`, `medium`, `hard`) is a **profile**: a *strategy* plus *noise*, configured in `application.yml`
 (`app.game.cpu.<difficulty>.strategy` and `.noise`; invalid values stop the application at startup).
-Defaults: **easy = random**, **medium = opponent-percentile with noise 0.25**, **hard = smart**.
+Defaults: **easy = random**, **medium = opponent-percentile with noise 0.25**, **hard = smart**, **extreme = counting** (smart plus card counting).
 
 | Strategy | What it does |
 |---|---|
@@ -60,6 +60,7 @@ Defaults: **easy = random**, **medium = opponent-percentile with noise 0.25**, *
 | `deck-percentile` | Judges a card on a stat by the share of the **whole deck** it beats. |
 | `opponent-percentile` | The share of **only the cards the CPU does not hold** that it beats. The CPU's own cards cannot be its opponents' cards, so counting them (as `deck-percentile` does) distorts the estimate. |
 | `smart` | Expected value: `p × prize − (1 − p) × cost`. `p` = the chance to beat **every** opponent in the round (the opponent-percentile, a tie counting half, raised to the number of opponents). `prize` = cards won (one per opponent plus the pot). `cost` = the card lost: 1 plus how much a keeper it is (its best stat's opponent-percentile). So a hopeless round is "lost anyway": the weakest card is given away and the strong ones are kept; a winnable round is played with the card that wins it. |
+| `counting` | `smart`, but with **card counting**: every revealed card, and who won it, is public. The CPU therefore knows which cards are still unseen and which cards each opponent is known to hold. An opponent who still has unseen cards plays one of the unseen cards next (won cards go to the bottom of a pile); otherwise one of the cards known to be theirs. `p` is the product, over the opponents in the round, of the chance to beat what THAT opponent can play; cards in the pot or already in play no longer count as possible opponents. |
 
 All strategies are fair: they use only the CPU's own hand, the deck (every card and its stats are public), how many opponents are in the round and the pot size — never another player's hand.
 **Noise** (0–1) is added to every judgement, as a share of the strategy's value range (0 = always the best option).
@@ -95,3 +96,4 @@ Conservation of cards at every step (hands + pot + in-flight = deck size) · no 
 - **A CPU delay longer than `clashCallSeconds`** (e.g. a 2 s window against a 1.5–4 s delay) simply loses to the timeout: the server draws the stat.
 - **Absent humans (live play):** a human who has no open connection while it is their turn is timed out after a grace period (default 15 s, counted from the later of the disconnect and the start of their turn), exactly as a turn timeout would: random stat, or the top card. It applies even when the game has no turn timeout, affects only that seat, and a clash race is left to its own timer (`GameEngine.timeoutSeat`).
 - **`smart` and a card that can only tie:** if a card cannot beat any unheld card on the stat but can tie, the tie is not counted as half a win. It is worth the chance of winning the resulting clash, estimated from the **overall strength of the CPU's other cards** (the average, over them, of their best stat against the cards the CPU does not hold), not from the stat in question: `P(tie) × (clashWin × clashPrize − (1 − clashWin) × clashCost) − P(lose) × cost`. Strong cards behind it mean a strong card is kept in play instead of being given away.
+- **Measured strength** (`CpuStrengthTest`, 400 seeded 2-seat games): medium, hard and extreme each beat easy ~95% of the time; hard vs medium ~55%, extreme vs hard ~50%. Once a CPU stops playing at random the game is mostly luck, and card counting sharpens an estimate that was already good, so `extreme` is not measurably stronger than `hard` yet. The simulator makes it cheap to try better ideas.

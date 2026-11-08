@@ -197,7 +197,7 @@ class GameServiceTest {
 
         lobby(4, GameStatus.WAITING, List.of(humanSeat(1, ANN)));
         for (String bad : new String[]{null, "", "impossible", "5"}) {
-            assertEquals("difficulty must be easy, medium or hard", assertThrows(BadRequestException.class, () -> service.addCpu("K7Q2XM", ANN, bad)).getMessage());
+            assertEquals("difficulty must be easy, medium, hard or extreme", assertThrows(BadRequestException.class, () -> service.addCpu("K7Q2XM", ANN, bad)).getMessage());
         }
         verify(games, never()).addCpuSeat(any(), anyInt(), any());
     }

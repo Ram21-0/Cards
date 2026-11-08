@@ -169,6 +169,31 @@ class CpuPlayerTest {
     }
 
     @Test
+    void countingMeasuresEachOpponentAgainstTheCardsThatOpponentCanStillPlay() {
+        // A (power 8, a keeper: best speed) and B (power 6, scrap). Unheld cards: 7, 9, 9, 9 - but the three 9s were revealed and
+        // are not in anybody's hand. Smart still fears them and sacrifices the scrap card; counting knows the opponent can only play the 7.
+        Card a = card(1, 8, 1), b = card(2, 6, 9);
+        Card seven = card(20, 7, 5);
+        List<Card> own = List.of(a, b);
+        List<Card> deck = all(own, List.of(seven, card(21, 9, 5), card(22, 9, 5), card(23, 9, 5)));
+
+        assertEquals(1, cpu(CpuStrategy.SMART, 0, 1, deck).pickCardForStat(own, POWER, DifficultyLevel.hard, sit(own, 1)),
+                "smart: the keeper is unlikely to win against all the unheld cards, so the scrap card is given away");
+        CpuPlayer.Situation counted = new CpuPlayer.Situation(own, 1, 0, List.of(List.of(seven)));
+        assertEquals(0, cpu(CpuStrategy.COUNTING, 0, 1, deck).pickCardForStat(own, POWER, DifficultyLevel.extreme, counted),
+                "counting: the only card the opponent can play is beaten by the keeper, so it plays the keeper and wins");
+    }
+
+    @Test
+    void countingWithoutKnowledgePlaysLikeSmart() {
+        Card a = card(1, 8, 1), b = card(2, 6, 9);
+        List<Card> own = List.of(a, b);
+        List<Card> deck = all(own, List.of(card(20, 7, 5), card(21, 9, 5), card(22, 9, 5), card(23, 9, 5)));
+        assertEquals(cpu(CpuStrategy.SMART, 0, 1, deck).pickCardForStat(own, POWER, DifficultyLevel.hard, sit(own, 1)),
+                cpu(CpuStrategy.COUNTING, 0, 1, deck).pickCardForStat(own, POWER, DifficultyLevel.extreme, sit(own, 1)));
+    }
+
+    @Test
     void smartPlaysTheCardThatWinsWhenARoundCanBeWon() {
         Card winner = card(1, 10, 5), other = card(2, 2, 5);
         List<Card> own = List.of(other, winner);

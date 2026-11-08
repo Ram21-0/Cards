@@ -21,7 +21,7 @@ All return the game (`GameResponse`) on success unless noted. `{code}` is the jo
 |---|---|---|
 | `POST /api/games` | any signed-in user | existing: create (you take seat 1 and are host) |
 | `POST /api/games/{code}/join` | signed in | existing; idempotent if you are already seated |
-| `POST /api/games/{code}/cpu` body `{"difficulty":"easy\|medium\|hard"}` | host | adds a CPU in the lowest free seat |
+| `POST /api/games/{code}/cpu` body `{"difficulty":"easy\|medium\|hard\|extreme"}` | host | adds a CPU in the lowest free seat |
 | `DELETE /api/games/{code}/seats/{seat}` | host | removes a **CPU** seat only |
 | `POST /api/games/{code}/leave` | seated human | leaves a WAITING game. Host leaving passes host to the lowest-seated human; if no human is left the game becomes `ABANDONED` |
 | `POST /api/games/{code}/start` | host | needs ≥ 2 seats; WAITING → IN_PROGRESS; seats are renumbered 1..n (gaps closed) |

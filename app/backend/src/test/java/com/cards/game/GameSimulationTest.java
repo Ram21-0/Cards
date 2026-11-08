@@ -70,7 +70,7 @@ class GameSimulationTest {
         for (int i = 1; i <= deckSize; i++) deck.add(simCard(i, maxValue, setup));
         GameSettings settings = new GameSettings(20 + setup.nextInt(181), setup.nextInt(6), 2 + setup.nextInt(9),
                 setup.nextBoolean() ? null : 5 + setup.nextInt(26));
-        CpuProfiles profiles = CpuProfiles.of(randomProfile(setup), randomProfile(setup), randomProfile(setup));
+        CpuProfiles profiles = CpuProfiles.of(randomProfile(setup), randomProfile(setup), randomProfile(setup), randomProfile(setup));
 
         TestClock clock = TestClock.atNow();
         GameEngine e = GameEngine.start(deck, STATS, specs, settings, profiles, new SplittableRandom(seed * 31 + 7), clock);

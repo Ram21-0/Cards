@@ -1,0 +1,12 @@
+# CPU difficulty "extreme" (3): smart play plus card counting. The check constraint from 001 only allowed 0..2.
+databaseChangeLog:
+
+  - changeSet:
+      id: 020-extreme-difficulty
+      author: cards
+      changes:
+        - sql: ALTER TABLE game_players DROP CONSTRAINT game_players_difficulty_check
+        - sql: ALTER TABLE game_players ADD CONSTRAINT game_players_difficulty_check CHECK (difficulty IN (0, 1, 2, 3))
+      rollback:
+        - sql: ALTER TABLE game_players DROP CONSTRAINT game_players_difficulty_check
+        - sql: ALTER TABLE game_players ADD CONSTRAINT game_players_difficulty_check CHECK (difficulty IN (0, 1, 2))

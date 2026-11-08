@@ -10,7 +10,8 @@ import lombok.experimental.Accessors;
 public enum DifficultyLevel implements DbEnum {
     easy(0),
     medium(1),
-    hard(2);
+    hard(2),
+    extreme(3);
 
     private final int dbVal;
 

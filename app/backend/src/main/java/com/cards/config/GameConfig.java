@@ -33,10 +33,13 @@ public class GameConfig {
             @Value("${app.game.cpu.medium.strategy:opponent-percentile}") String mediumStrategy,
             @Value("${app.game.cpu.medium.noise:0.25}") double mediumNoise,
             @Value("${app.game.cpu.hard.strategy:smart}") String hardStrategy,
-            @Value("${app.game.cpu.hard.noise:0}") double hardNoise) {
+            @Value("${app.game.cpu.hard.noise:0}") double hardNoise,
+            @Value("${app.game.cpu.extreme.strategy:counting}") String extremeStrategy,
+            @Value("${app.game.cpu.extreme.noise:0}") double extremeNoise) {
         return CpuProfiles.of(
                 CpuProfile.of(CpuStrategy.fromConfig(easyStrategy), easyNoise),
                 CpuProfile.of(CpuStrategy.fromConfig(mediumStrategy), mediumNoise),
-                CpuProfile.of(CpuStrategy.fromConfig(hardStrategy), hardNoise));
+                CpuProfile.of(CpuStrategy.fromConfig(hardStrategy), hardNoise),
+                CpuProfile.of(CpuStrategy.fromConfig(extremeStrategy), extremeNoise));
     }
 }

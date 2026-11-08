@@ -29,7 +29,16 @@ public enum CpuStrategy {
      * {@code p × (cards won) − (1 − p) × (cost of losing this card)}: a hopeless round is "lost anyway", so the weakest
      * card is sacrificed and the strong ones are kept; a safe round is played with the card that wins it.
      */
-    SMART("smart");
+    SMART("smart"),
+
+    /**
+     * SMART plus card counting. Every card revealed so far is public and so is who won it, so the CPU knows which cards
+     * are still unseen and what each opponent is known to hold. An opponent's next card is one of the unseen cards while
+     * they still have any (won cards go to the bottom of a pile) and otherwise one of the cards known to be theirs, so the
+     * chance to beat each opponent is measured against what THAT opponent can actually play, and cards sitting in the pot
+     * or already in play no longer count as possible opponents.
+     */
+    COUNTING("counting");
 
     private final String configName;
 
@@ -48,6 +57,6 @@ public enum CpuStrategy {
         for (CpuStrategy s : values()) {
             if (s.configName.equals(normalized)) return s;
         }
-        throw new IllegalArgumentException("Unknown CPU strategy '" + name + "' (use random, deck-percentile, opponent-percentile or smart)");
+        throw new IllegalArgumentException("Unknown CPU strategy '" + name + "' (use random, deck-percentile, opponent-percentile, smart or counting)");
     }
 }

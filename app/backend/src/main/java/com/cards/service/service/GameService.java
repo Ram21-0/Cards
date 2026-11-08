@@ -240,7 +240,7 @@ public class GameService {
         for (DifficultyLevel level : DifficultyLevel.values()) {
             if (level.name().equalsIgnoreCase(name == null ? "" : name.trim())) return level;
         }
-        throw new BadRequestException("difficulty must be easy, medium or hard");
+        throw new BadRequestException("difficulty must be easy, medium, hard or extreme");
     }
 
     private static int lowestFreeSeat(List<SeatInfo> seats) {

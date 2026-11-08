@@ -70,6 +70,7 @@ public final class GameEngine {
     private final TreeSet<Integer> pendingChoosers = new TreeSet<>();         // seats that still may CHOOSE
     private final List<CpuCall> cpuCalls = new ArrayList<>();                 // clash race, sorted by (dueAt, seat)
     private final Map<Integer, Integer> placements = new TreeMap<>();
+    private final Set<Integer> revealedEver = new HashSet<>();                // card ids shown to everybody so far (public knowledge)
     private final List<GameEvent> out = new ArrayList<>();
     private Phase phase;
     private int callerSeat;
@@ -471,6 +472,7 @@ public final class GameEngine {
             if (!inFlight.containsKey(s)) commit(seats.get(s - 1), 0);
         }
         out.add(new GameEvent.Revealed(Collections.unmodifiableMap(new LinkedHashMap<>(inFlight))));
+        for (Card c : inFlight.values()) revealedEver.add(c.id());
 
         List<Integer> best = bestSeats();
         if (best.size() == 1) {
@@ -685,7 +687,38 @@ public final class GameEngine {
     private CpuPlayer.Situation situation(Seat seat) {
         List<Card> own = new ArrayList<>(seat.hand);
         if (inFlight.containsKey(seat.number)) own.add(inFlight.get(seat.number));
-        return new CpuPlayer.Situation(own, Math.max(0, contenders.size() - 1), pot.size());
+        int opponents = Math.max(0, contenders.size() - 1);
+        List<List<Card>> pools = cpu.countsCards(seat.spec.difficulty()) ? opponentPools(seat) : List.of();
+        return new CpuPlayer.Situation(own, opponents, pot.size(), pools);
+    }
+
+    /**
+     * Card counting, from public information only: which cards were revealed and who won them. A pile holds its
+     * never-revealed cards above everything it won (won cards go to the bottom), so an opponent who still has unseen
+     * cards will play one of the unseen cards next; otherwise they play one of the revealed cards known to be theirs.
+     */
+    private List<List<Card>> opponentPools(Seat me) {
+        List<Card> unseen = new ArrayList<>();
+        for (Seat s : seats) {
+            for (Card c : holdings(s)) if (!revealedEver.contains(c.id()) && s != me) unseen.add(c);
+        }
+        unseen.sort(java.util.Comparator.comparingInt(Card::id));          // only to keep the list order stable; no seat is revealed
+        List<List<Card>> pools = new ArrayList<>();
+        for (int number : contenders) {
+            if (number == me.number) continue;
+            Seat o = seats.get(number - 1);
+            List<Card> known = new ArrayList<>();
+            for (Card c : holdings(o)) if (revealedEver.contains(c.id())) known.add(c);
+            int hidden = holdings(o).size() - known.size();
+            pools.add(hidden > 0 || known.isEmpty() ? unseen : known);
+        }
+        return pools;
+    }
+
+    private List<Card> holdings(Seat s) {
+        List<Card> all = new ArrayList<>(s.hand);
+        if (inFlight.containsKey(s.number)) all.add(inFlight.get(s.number));
+        return all;
     }
 
     private Instant turnDeadline(Instant at) {

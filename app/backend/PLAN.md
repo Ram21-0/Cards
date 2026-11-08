@@ -174,3 +174,11 @@ Neon branches: `main` (prod) and `dev` (copy-on-write, free). One `DATABASE_URL`
 ## Security checklist
 No secrets in git (`.env` ignored) · validate/length-limit usernames · CORS limited to the frontend origin ·
 rate-limit write endpoints · don't log connection strings · hash passwords with BCrypt if you add them.
+
+## Ideas for later (not started; agreed as worth doing)
+- **Forfeit and rejoin:** an explicit leave-a-running-game rule. Today a player who closes the socket stays seated and the absence grace plays for them. Options: the seat is taken over by a CPU on leave (and the player may rejoin to take it back), or the leaver is eliminated.
+- **Rematch:** one action after a game ends that creates a new lobby with the same seats (humans + CPUs) and settings, and tells everyone connected where to go.
+- **Event replay on reconnect:** keep the last N events per game so a reconnecting client can replay what it missed (today it only gets the current `view`).
+- **Chat or quick reactions** between players in a game.
+- **Per-game event log** saved at game over, so finished games can be replayed or reviewed.
+- Smaller CPU ideas: hard CPU's caller-CHOOSE across several stats, better stat choice in a clash race, opponent modelling, named CPU personalities, tunable `smart` weights; the strength simulator is `CpuStrengthTest`.
