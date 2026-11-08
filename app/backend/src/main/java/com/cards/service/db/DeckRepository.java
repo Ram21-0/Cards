@@ -1,11 +1,6 @@
 package com.cards.service.db;
 
-import com.cards.common.ComparisonStrategy;
-import com.cards.common.Deck;
-import com.cards.common.DisplayFormat;
-import com.cards.common.StatDefinition;
-import com.cards.common.ValueType;
-import com.cards.common.Visibility;
+import com.cards.common.*;
 import lombok.RequiredArgsConstructor;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.jdbc.core.RowMapper;
@@ -22,12 +17,16 @@ public class DeckRepository {
 
     private final JdbcTemplate jdbc;
 
+    private static final String CARD_COUNT_SELECT =
+            "select d.*, (select count(*) from cards c where c.deck_id = d.id) as card_count from decks d";
+
     private static final RowMapper<Deck> DECK = (rs, i) -> Deck.builder()
             .id(rs.getObject("id", UUID.class))
             .ownerId(rs.getObject("owner_id", UUID.class))
             .name(rs.getString("name"))
             .description(rs.getString("description"))
             .visibility(Visibility.get(rs.getInt("visibility")))
+            .cardCount(rs.getInt("card_count"))
             .createdAt(rs.getTimestamp("created_at").toInstant())
             .updatedAt(rs.getTimestamp("updated_at").toInstant())
             .build();
@@ -45,12 +44,12 @@ public class DeckRepository {
             .build();
 
     public List<Deck> findPublic() {
-        return jdbc.query("select * from decks where visibility = ? order by name", DECK, Visibility.PUBLIC.dbVal())
+        return jdbc.query(CARD_COUNT_SELECT + " where d.visibility = ? order by d.name", DECK, Visibility.PUBLIC.dbVal())
                 .stream().map(this::withStats).toList();
     }
 
     public Optional<Deck> findById(UUID id) {
-        return jdbc.query("select * from decks where id = ?", DECK, id)
+        return jdbc.query(CARD_COUNT_SELECT + " where d.id = ?", DECK, id)
                 .stream().findFirst().map(this::withStats);
     }
 

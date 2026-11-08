@@ -18,6 +18,7 @@ public class Deck {
     private final String name;
     private final String description;
     private final Visibility visibility;
+    private final Integer cardCount;                // number of cards in the deck (null when not loaded)
     private final List<StatDefinition> stats;       // ordered by displayOrder
     private final Instant createdAt;
     private final Instant updatedAt;

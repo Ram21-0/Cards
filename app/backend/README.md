@@ -69,7 +69,8 @@ src/test/java/com/cards/common     ModelTest
 ```
 
 Request flow: `controller` (HTTP, DTOs) → `service` (rules) → `db` (SQL) → `common` model classes.
-Working today: `GET /api/health`, `GET /api/decks`, `GET /api/decks/{id}`, `GET /api/decks/{id}/cards`
+Working today: `GET /api/health`, `GET /api/decks` (each deck has `cardCount`), `GET /api/decks/{id}`, `GET /api/decks/{id}/cards`,
+`POST /api/players`, `POST /api/games`, `GET /api/games/{joinCode}` (see the contract in PLAN.md)
 (the cards table is empty until you seed it). Everything marked "stub" is a placeholder for the next phases in PLAN.md.
 
 How the pieces fit: `DatabaseConfig` defines the one `DataSource` bean → Spring Boot's Liquibase runs the

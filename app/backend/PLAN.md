@@ -48,9 +48,23 @@ Defaults — change any of them in one place (the rules engine):
 2. `GET /api/decks` — public decks (+ the caller's own); `GET /api/decks/{id}` — deck with stat definitions;
    `GET /api/decks/{id}/cards` — `{ id, name, img, stats: { height: { value: 73, displayValue: "6'1\"" }, … }, meta: {…} }`
    (stats are in the deck's `display_order`; `displayValue` is formatted server-side from the stat's `display_format`, so clients just render it)
-3. `POST /api/players` `{username}` — create (409 if taken, max 8 chars, lowercased like the Android app)
-4. **Lobby:** `POST /api/games` `{deckId, maxPlayers, turnTimeoutSeconds?}` → `{id, joinCode, joinUrl}` (host takes seat 1);
-   `GET /api/games/{joinCode}` — status, deck, seats; `POST /api/games/{joinCode}/join` — take the next free seat;
+3. `POST /api/players` `{"username": "ann"}` → `201 {"id": "<uuid>", "username": "ann"}` ✅ built
+   - trimmed + lowercased; valid = 1–8 chars of `[a-z0-9_]`, else `400 {"error": …}`; taken → `409 {"error": "Username already taken"}`
+   - no auth yet: the client keeps the returned `id` as its identity
+4. **Lobby:**
+   - `POST /api/games` `{"deckId": "<uuid>", "maxPlayers": 4, "hostId": "<uuid, optional>"}` → `201` ✅ built
+     ```json
+     { "id": "<uuid>", "joinCode": "K7Q2XM", "joinUrl": "<frontend base>/?join=K7Q2XM", "status": "WAITING", "maxPlayers": 4,
+       "deck": { "id": "<uuid>", "name": "Wrestling" },
+       "seats": [ { "seat": 1, "kind": "HUMAN", "username": "ann", "difficulty": null } ] }
+     ```
+     `deckId` required; `maxPlayers` 2–8; the deck must be public/unlisted (else 404) and have at least `maxPlayers` cards (else 400);
+     `hostId` must exist (else 404) and takes seat 1 (no `hostId` = no seats). `joinUrl` uses `app.frontend-base-url`
+     (local `http://localhost:8081`, prod `${FRONTEND_ORIGIN}`). Join codes: 6 chars from `ABCDEFGHJKLMNPQRSTUVWXYZ23456789`, `SecureRandom`,
+     inserted with `ON CONFLICT DO NOTHING` and retried on collision.
+   - `GET /api/games/{joinCode}` (case-insensitive) → same body; 404 if unknown. The deck is looked up without the private filter so joiners see its name. ✅ built
+   - Errors are always `{"error": "<message>"}`: 400 (`BadRequestException`, malformed body), 404 (`NotFoundException`), 409 (`ConflictException`).
+   - `POST /api/games/{joinCode}/join` — take the next free seat;
    `POST /api/games/{joinCode}/cpu` `{difficulty}` — host adds a CPU seat; `DELETE …/seats/{n}` — host removes one;
    `POST /api/games/{joinCode}/start` — host only, needs ≥ 2 seats
 5. **Play:** `POST /api/games/{joinCode}/play` `{stat}` — only the current caller; the server resolves the round (CPUs and timeouts handled server-side)
@@ -62,9 +76,9 @@ Defaults — change any of them in one place (the rules engine):
 - [x] **0 Connect** — local Postgres (5433) works; Neon dev next
 - [ ] **1 Decks + cards** — seed cards into the Wrestling deck (export Firebase `Data`, or the placeholder 54), repositories/row mappers for the model classes, `GET /api/decks…`, CORS for the frontend origin
 - [ ] **2 Frontend uses it** — frontend fetches decks/cards (keep `data/cards.js` as offline fallback) and reads stat definitions instead of the hardcoded `STATS`
-- [ ] **3 Players** — usernames / anonymous device token, `POST /api/players`
+- [x] **3 Players** — `POST /api/players` (usernames; anonymous device token / auth still to come)
 - [ ] **4 Rules engine (pure Java, N players)** — `Engine` with the multiplayer rules above, CPU seat logic, placements; unit-test it hard (3-way ties, caller eliminated, uneven deal, simultaneous elimination, conservation of cards)
-- [ ] **5 Lobby + games** — create/join/add CPU/start, persistence of `games` / `game_players`
+- [ ] **5 Lobby + games** — create + read are built; join / add CPU / start still to do
 - [ ] **6 Live play** — WebSocket events, turn timeout, reconnect (rebuild a player's view from server state), hidden-information check
 - [ ] **7 Leaderboard**
 - [ ] **8 Frontend: lobby + multiplayer table** — share link, seats list, "add CPU", up to 8 players' card counts; the card component stays as is
