@@ -3,6 +3,8 @@ package com.cards.service.controller;
 import com.cards.common.BadRequestException;
 import com.cards.common.ConflictException;
 import com.cards.common.NotFoundException;
+import com.cards.common.ServiceUnavailableException;
+import com.cards.common.UnauthorizedException;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.http.converter.HttpMessageNotReadableException;
@@ -28,6 +30,16 @@ public class ApiExceptionHandler {
     @ExceptionHandler(ConflictException.class)
     public ResponseEntity<Map<String, String>> conflict(ConflictException e) {
         return error(HttpStatus.CONFLICT, e.getMessage());
+    }
+
+    @ExceptionHandler(UnauthorizedException.class)
+    public ResponseEntity<Map<String, String>> unauthorized(UnauthorizedException e) {
+        return error(HttpStatus.UNAUTHORIZED, e.getMessage());
+    }
+
+    @ExceptionHandler(ServiceUnavailableException.class)
+    public ResponseEntity<Map<String, String>> unavailable(ServiceUnavailableException e) {
+        return error(HttpStatus.SERVICE_UNAVAILABLE, e.getMessage());
     }
 
     /** Malformed JSON or a wrongly typed field (e.g. deckId that is not a UUID). */

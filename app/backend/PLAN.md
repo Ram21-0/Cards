@@ -15,7 +15,7 @@ Decks define their own stats; games are played with a deck.
 | `decks` | a set of cards that can be played | `name`, `description`, `visibility` (`public` listed · `unlisted` link-only · `private` owner-only), `owner_id` (null = built-in) |
 | `deck_stats` | what each card in the deck holds | `key`, `label`, `unit`, `value_type`, **`comparison_strategy`** (`higher_wins`/`lower_wins`), `display_order` |
 | `cards` | cards of a deck | `stats` jsonb `{"rank":12,"fight":44,…}` (keys must match the deck's `deck_stats`, validated in code); `meta` jsonb for display-only extras (e.g. `brand`) |
-| `players` | accounts | username unique; add `password_hash` in a later migration when auth lands |
+| `players` | accounts | username unique; Google sign-in adds `google_sub`, `email`, `display_name`, `avatar_url` and a `sessions` table (see *Authentication*) |
 | `games` | one play-through with a deck, 2–8 seats | `join_code` (shareable), `deck_id`, `host_id`, `max_players`, `turn_timeout_seconds` (null = none), `status` (`waiting` lobby → `in_progress` → `finished`/`abandoned`) |
 | `game_players` | the seats of a game | `seat`, `kind` (`HUMAN`/`CPU`), `player_id` (humans), `difficulty` (CPUs), `placement` (1 = winner); feeds the leaderboard |
 
@@ -72,11 +72,76 @@ Defaults — change any of them in one place (the rules engine):
    REST for actions, push for state. `spring-boot-starter-websocket` when you get there.
 7. `GET /api/leaderboard` — wins (`placement = 1`), games, win rate per player
 
+## Authentication (Google sign-in)
+
+**Decisions (agreed with the user)**
+- **Who must sign in:** only people who want to **create or join a multiplayer game**. Solo play vs the CPU, the deck gallery and the public GET endpoints stay anonymous.
+- **No guests.** Joining via a link requires signing in with Google (the link first shows a read-only preview of the game, then asks to sign in).
+- **Hosting (decided): one origin in production.** Spring Boot serves the static frontend (`app/frontend`, copied into `static/` at build time) next to the API, so the browser sees a single site: no CORS in prod, first-party cookies, WebSockets on the same origin, one Google "authorized origin". Locally the frontend (:8081) and API (:8080) stay separate — `localhost` ports are the same *site*, so cookies still work with CORS-with-credentials. If you later split to `app.<domain>` / `api.<domain>` (same registrable domain) nothing in the cookie design changes; keep `apiBase` configurable.
+
+**Flow**
+1. Frontend loads Google Identity Services and shows the "Sign in with Google" button (`config.js` has `googleClientId`; one-time nonce from `POST /api/auth/nonce`).
+2. Google returns an **ID token** to the browser → `POST /api/auth/google {credential}`.
+3. Backend verifies it (signature via Google keys, `aud` = our client id, `iss`, `exp`, `nonce`, `email_verified`), finds or creates the player by the stable Google **`sub`** (never by email), creates a session and sets it as a cookie.
+4. Every later request is authenticated by the cookie, never by the Google token. `GET /api/me` tells the UI who is signed in.
+
+**Sessions:** random 256-bit token, only its SHA-256 hash is stored (`sessions` table: `token_hash`, `player_id`, `created_at`, `expires_at`, `last_seen`). Cookie: `HttpOnly; Secure` (prod); `SameSite=Lax`; `__Host-` prefix in prod. Revocable (logout / delete account). The same token is also accepted as `Authorization: Bearer` so a future Android client can reuse it. Libraries: `spring-boot-starter-security` (cookie-session filter, CSRF, CORS, method security) + `google-api-client` `GoogleIdTokenVerifier`, wrapped in our own `GoogleTokenVerifier` interface so tests use a fake and never call Google.
+
+**Data model (new changeset `002-auth.yaml`)**
+- `players`: add `google_sub` (unique, not null for real accounts), `email`, `display_name`, `avatar_url`; make `username` **nullable** (chosen once after the first sign-in: 1–8 chars `[a-z0-9_]`, unique).
+- `sessions`: as above.
+
+**Endpoints**
+| Endpoint | Auth | Purpose |
+|---|---|---|
+| `POST /api/auth/nonce` | – | one-time nonce for the Google sign-in |
+| `POST /api/auth/google` `{credential}` | – | verify token, set cookie, return the player |
+| `GET /api/me` | cookie | current player or 401 |
+| `PUT /api/me` `{username}` | cookie | choose/change username (400 invalid, 409 taken) |
+| `POST /api/auth/logout` | cookie | delete session, clear cookie |
+| `DELETE /api/me` | cookie | delete the account (privacy) |
+| `POST /api/dev/login` `{username}` | **local profile only** | dev/test sign-in without Google |
+
+**Stage 1 — built (additive, nothing existing changed)**
+- Changeset `002-auth.yaml`: `players.google_sub` (unique) / `email` / `display_name` / `avatar_url`, `username` nullable; `sessions` table.
+- Responses (`MeResponse`): `{ "id", "username" (null until chosen), "displayName", "avatarUrl", "email", "needsUsername" }`.
+  - `POST /api/auth/nonce` → `{ "nonce" }` (single use, 5 minutes, held in memory — move to the DB if you run several instances).
+  - `POST /api/auth/google {credential}` → 200 `MeResponse` + `Set-Cookie`. `400` no credential · `401` forged/expired/wrong-audience token, unverified email, unknown/reused/expired nonce · `503` `GOOGLE_CLIENT_ID` not set or Google's keys unreachable.
+  - `GET /api/me` → `MeResponse`, or `401 {"error":"Sign in required"}`.
+  - `PUT /api/me {username}` → `MeResponse`; `400` invalid (1–8 of `[a-z0-9_]`, trimmed + lowercased), `409` taken; choosing your own current name again is fine.
+  - `POST /api/auth/logout` → 204 and the cookie is cleared (idempotent, also fine when signed out).
+  - `DELETE /api/me` → 204; all sessions end and the account is **anonymized** (username, Google id, email, name, avatar all wiped, username freed) — the row stays so finished games keep their history.
+  - `POST /api/dev/login {username}` → `MeResponse` + cookie; exists **only** where `app.dev-login.enabled=true` (set in `resources/local/application.yml`); in any other config it is a 404.
+- **Cookie:** `session=<token>; Path=/; HttpOnly; SameSite=Lax; Max-Age=30 days` (`Secure` and the `__Host-session` name in prod). The token is also accepted as `Authorization: Bearer <token>`.
+- **CSRF rule for cookie sessions:** state-changing requests sent *with the cookie* to `/api/me` and `/api/auth/logout` must carry an `X-Requested-With` header (any value) or get `403 {"error":"Missing X-Requested-With header"}`. Bearer clients are exempt. Stage 2 adds the game endpoints to this list.
+- **CORS:** exact origins from `app.cors.allowed-origins` with `Access-Control-Allow-Credentials: true`; allowed headers `Content-Type, Authorization, X-Requested-With`. The frontend must use `fetch(..., { credentials: 'include' })`.
+- **Config:** `GOOGLE_CLIENT_ID` (env or `.env.<APP_ENV>`; empty by default), `app.session.ttl-days` (30), `app.session.cookie-name`, `app.session.cookie-secure`.
+- **Not done yet:** rate-limiting `/api/auth/*`, a scheduled purge of expired sessions (they are purged whenever a session is created), the stage-2 changes below.
+
+**Changes to existing endpoints** *(stage 2 — only after the Frontend session has switched)*
+- `POST /api/games` requires sign-in; the host is the **session's player**. The `hostId` body field is removed (a client-supplied host id would allow impersonation).
+- `POST /api/games/{code}/join` (next backend step) requires sign-in.
+- `GET /api/games/{code}` stays readable without sign-in (join-link preview).
+- The anonymous `POST /api/players` is removed once sign-in ships (`/api/dev/login` replaces it for local development). **The Frontend session must be told before this lands** — it currently stores the returned player id as the host identity.
+- CORS: `allowCredentials(true)` with the exact origin list (never `*`); frontend `fetch` uses `credentials: 'include'`.
+
+**Security checklist:** verify the token server-side on every login, including the audience; nonce against replay; `HttpOnly`/`Secure`/`SameSite` cookie; require a custom header (or CSRF token) on state-changing requests; rate-limit `/api/auth/*`; expire and purge old sessions; never log tokens or cookies; store only `sub`, name, avatar and email.
+
+**You do (Google Cloud, ~10 min):** create a project → OAuth consent screen (External; app name, support email; scopes `openid email profile`; add yourself as a test user while in Testing) → Credentials → *OAuth client ID* → **Web application** → authorized JavaScript origins `http://localhost`, `http://localhost:8081` (and later the prod origin). No redirect URI and no client secret are needed for this flow. Send the **Client ID**: it goes in the frontend `config.js` and the backend `GOOGLE_CLIENT_ID` setting.
+
+**Build order**
+1. *You:* Google Cloud client id.
+2. *Backend:* `002-auth.yaml`; `GoogleTokenVerifier` (+ fake for tests); session service + cookie; Spring Security; the endpoints above; protect `POST /api/games`; tests (expired/forged token, wrong audience, username rules, session expiry, unauthenticated create-game → 401).
+3. *Backend:* serve the frontend from Spring Boot in the `prod` build; CORS-with-credentials for local.
+4. *Frontend:* Google button, `GET /api/me` on load, username screen, logout, 401 handling, join-link preview → sign-in → join; drop `hostId`/`POST /api/players`.
+5. *Later:* the WebSocket handshake reuses the cookie; Android uses the same token endpoint with a bearer token.
+
 ## Phases
 - [x] **0 Connect** — local Postgres (5433) works; Neon dev next
 - [ ] **1 Decks + cards** — seed cards into the Wrestling deck (export Firebase `Data`, or the placeholder 54), repositories/row mappers for the model classes, `GET /api/decks…`, CORS for the frontend origin
 - [ ] **2 Frontend uses it** — frontend fetches decks/cards (keep `data/cards.js` as offline fallback) and reads stat definitions instead of the hardcoded `STATS`
-- [x] **3 Players** — `POST /api/players` (usernames; anonymous device token / auth still to come)
+- [x] **3a Players (anonymous, temporary)** — `POST /api/players`; replaced by Google sign-in below
+- [ ] **3b Google sign-in** — see *Authentication* above
 - [ ] **4 Rules engine (pure Java, N players)** — `Engine` with the multiplayer rules above, CPU seat logic, placements; unit-test it hard (3-way ties, caller eliminated, uneven deal, simultaneous elimination, conservation of cards)
 - [ ] **5 Lobby + games** — create + read are built; join / add CPU / start still to do
 - [ ] **6 Live play** — WebSocket events, turn timeout, reconnect (rebuild a player's view from server state), hidden-information check

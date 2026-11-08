@@ -95,7 +95,7 @@ class GameServiceTest {
     @Test
     void hostTakesSeatOne() {
         when(decks.get(DECK_ID)).thenReturn(deck(54));
-        when(players.findById(HOST_ID)).thenReturn(Optional.of(new Player(HOST_ID, "ann", Instant.now())));
+        when(players.findById(HOST_ID)).thenReturn(Optional.of(Player.builder().id(HOST_ID).username("ann").createdAt(Instant.now()).build()));
         Game created = game("K7Q2XM");
         when(games.insertIfCodeFree(anyString(), eq(DECK_ID), eq(HOST_ID), eq(4))).thenReturn(Optional.of(created));
         List<SeatInfo> seats = List.of(new SeatInfo(1, SeatKind.HUMAN, "ann", null));

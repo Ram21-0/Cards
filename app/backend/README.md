@@ -86,6 +86,21 @@ com.cards
 └── web/       CORS config, error handling
 ```
 
+## Sign-in (Google)
+Players sign in with Google; the backend verifies the ID token and gives the browser an HttpOnly session cookie.
+The full design and the endpoint contract are in `PLAN.md` ("Authentication").
+
+- **Client id:** create an OAuth *Web application* client in Google Cloud (authorized JavaScript origins `http://localhost` and `http://localhost:8081`),
+  then put `GOOGLE_CLIENT_ID=<id>.apps.googleusercontent.com` in `app/backend/.env.local` (prod: set it as an environment variable).
+  Without it `POST /api/auth/google` answers `503 Google sign-in is not configured`; everything else works.
+- **Without Google, locally:** `POST /api/dev/login {"username":"ann"}` signs you in (local config only; it does not exist in prod):
+  ```bash
+  curl -c jar -X POST -H 'Content-Type: application/json' -d '{"username":"ann"}' localhost:8080/api/dev/login
+  curl -b jar localhost:8080/api/me
+  curl -b jar -X PUT -H 'X-Requested-With: cards' -H 'Content-Type: application/json' -d '{"username":"annie"}' localhost:8080/api/me
+  ```
+- **Tests never call Google:** the token verifier is an interface; tests use a fake, and the real verifier is exercised offline with throwaway keys.
+
 ## Changing the schema (Liquibase)
 - Add a new file `src/main/resources/db/changelog/changes/002-something.yaml` and `include` it at the end of `db.changelog-master.yaml`.
 - Never edit a changeSet that has already run on a shared database (Liquibase checks a checksum and will refuse to start). While nothing is deployed, `001-init.yaml` may still be edited — then drop and recreate your local database.

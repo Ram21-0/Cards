@@ -4,6 +4,9 @@ logging:
     com.cards: INFO
 
 app:
+  session:
+    cookie-name: __Host-session              # __Host- prefix: browsers only accept it as Secure, Path=/, no Domain
+    cookie-secure: true
   frontend-base-url: ${FRONTEND_ORIGIN}   # used to build shareable join links
   cors:
     allowed-origins: ${FRONTEND_ORIGIN}      # set on the host, e.g. https://cards.example.com

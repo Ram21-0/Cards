@@ -24,7 +24,7 @@ class PlayerServiceTest {
     private final PlayerService service = new PlayerService(repo);
 
     private static Player player(String name) {
-        return new Player(UUID.randomUUID(), name, Instant.now());
+        return Player.builder().id(UUID.randomUUID()).username(name).createdAt(Instant.now()).build();
     }
 
     @Test
