@@ -90,9 +90,11 @@ com.cards
 Players sign in with Google; the backend verifies the ID token and gives the browser an HttpOnly session cookie.
 The full design and the endpoint contract are in `PLAN.md` ("Authentication").
 
-- **Client id:** create an OAuth *Web application* client in Google Cloud (authorized JavaScript origins `http://localhost` and `http://localhost:8081`),
-  then put `GOOGLE_CLIENT_ID=<id>.apps.googleusercontent.com` in `app/backend/.env.local` (prod: set it as an environment variable).
-  Without it `POST /api/auth/google` answers `503 Google sign-in is not configured`; everything else works.
+- **Setting:** `GOOGLE_CLIENT_ID` — the OAuth *Web application* client id from Google Cloud (Credentials → OAuth client ID; authorized JavaScript origins
+  `http://localhost` and `http://localhost:8081`, plus the production origin later). Locally it goes in `app/backend/.env.local`; in production set it as an
+  environment variable. The templates `.env.local.example` / `.env.prod.example` list the key with an empty value; the real value is not committed.
+  The backend rejects every ID token whose audience is not this client id. Without it `POST /api/auth/google` answers `503 Google sign-in is not configured`;
+  everything else works. The frontend needs the same id in its `config.js` (`googleClientId`).
 - **Without Google, locally:** `POST /api/dev/login {"username":"ann"}` signs you in (local config only; it does not exist in prod):
   ```bash
   curl -c jar -X POST -H 'Content-Type: application/json' -d '{"username":"ann"}' localhost:8080/api/dev/login
