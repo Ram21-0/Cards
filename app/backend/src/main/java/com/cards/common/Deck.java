@@ -10,7 +10,7 @@ import java.util.UUID;
 
 /** A set of cards that can be played. Defines what its cards hold and how each stat is compared. */
 @Getter
-@Builder
+@Builder(toBuilder = true)
 @Accessors(fluent = true)
 public class Deck {
     private final UUID id;

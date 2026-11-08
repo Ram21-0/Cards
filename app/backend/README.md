@@ -48,24 +48,29 @@ Added (`@Getter`, `@Builder`, `@Slf4j`, `@RequiredArgsConstructor`, …). Two th
 ## 2. Code overview
 
 ```
-app/backend
-├── pom.xml                         Spring Boot 3.5, Java 21, web + jdbc + postgres + flyway
-├── .env.local(.example)            local DB (Neon dev branch)   — real file git-ignored
-├── .env.prod(.example)             prod DB (Neon main branch)   — real file git-ignored
-└── src/main
-    ├── java/com/cards
-    │   ├── CardsApplication.java   entry point (@SpringBootApplication)            [provided]
-    │   └── config
-    │       ├── DatabaseConfig.java converts Neon's postgresql:// URL -> JDBC +     [provided]
-    │       │                       HikariCP pool tuned for Neon's free tier
-    │       └── ConnectionCheck.java logs "Database connected" at startup            [provided, deletable]
-    └── resources
-        ├── application.yml         common settings; imports local/ or prod/ + the .env file   [provided]
-        ├── local/application.yml   dev-only, non-secret (debug logging, CORS for localhost:8081)
-        ├── prod/application.yml    prod-only, non-secret (info logging, CORS from FRONTEND_ORIGIN)
-        └── db/migration
-            └── V1__init.sql        players / decks / deck_stats / cards / games / game_players + Wrestling deck   [editable until first shared run]
+src/main/java/com/cards
+├── CardsApplication.java          entry point
+├── config/                        DatabaseConfig (Neon/local URL -> pool), ConnectionCheck, WebConfig (CORS)
+├── common/                        domain model, no Spring: Deck, StatDefinition, Stat, Card, Game, GamePlayer, Player,
+│                                  enums (DbEnum codes: Visibility, ComparisonStrategy, ValueType, SeatKind, GameStatus,
+│                                  DifficultyLevel) + Outcome, NotFoundException, Util
+└── service/
+    ├── controller/                HTTP layer: HealthController, DeckController (+ Game/Player stubs),
+    │   └── dto/                   response records (what the JSON looks like), ApiExceptionHandler (errors -> JSON)
+    ├── service/                   business rules: DeckService (visibility), Game/Player stubs
+    └── db/                        SQL via JdbcTemplate, rows -> model classes: DeckRepository, CardRepository (+ stubs)
+
+src/main/resources
+├── application.yml                common settings; imports local/ or prod/ + the .env file
+├── local/ , prod/                 per-environment non-secret settings (log level, CORS origins)
+└── db/migration/V1__init.sql      schema + built-in Wrestling deck
+
+src/test/java/com/cards/common     ModelTest
 ```
+
+Request flow: `controller` (HTTP, DTOs) → `service` (rules) → `db` (SQL) → `common` model classes.
+Working today: `GET /api/health`, `GET /api/decks`, `GET /api/decks/{id}`, `GET /api/decks/{id}/cards`
+(the cards table is empty until you seed it). Everything marked "stub" is a placeholder for the next phases in PLAN.md.
 
 How the pieces fit: `DatabaseConfig` defines the one `DataSource` bean → Spring Boot's Flyway runs the
 migrations with it → anything you write that takes a `DataSource` or `JdbcTemplate` gets the same pool.
