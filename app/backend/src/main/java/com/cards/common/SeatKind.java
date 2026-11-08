@@ -4,17 +4,17 @@ import lombok.AllArgsConstructor;
 import lombok.Getter;
 import lombok.experimental.Accessors;
 
-/** Opponent type for a game. */
+/** Who occupies a seat in a game. */
 @Getter
 @AllArgsConstructor
 @Accessors(fluent = true)
-public enum GameMode implements DbEnum {
-    CPU(0),
-    PVP(1);
+public enum SeatKind implements DbEnum {
+    HUMAN(0),
+    CPU(1);
 
     private final int dbVal;
 
-    public static GameMode get(int dbVal) {
-        return Util.fromDbVal(GameMode.class, dbVal);
+    public static SeatKind get(int dbVal) {
+        return Util.fromDbVal(SeatKind.class, dbVal);
     }
 }

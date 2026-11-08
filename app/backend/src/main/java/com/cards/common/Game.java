@@ -7,7 +7,10 @@ import lombok.experimental.Accessors;
 import java.time.Instant;
 import java.util.UUID;
 
-/** One play-through with a deck. {@code joinCode} is what gets shared: link = <frontend>/join/<joinCode>. */
+/**
+ * One play-through with a deck, for 2..8 seats (humans and/or CPUs, see {@link GamePlayer}).
+ * {@code joinCode} is what gets shared: link = <frontend>/join/<joinCode>.
+ */
 @Getter
 @Builder
 @Accessors(fluent = true)
@@ -16,8 +19,8 @@ public class Game {
     private final String joinCode;
     private final UUID deckId;
     private final UUID hostId;                      // null = anonymous host
-    private final GameMode mode;
-    private final DifficultyLevel difficulty;       // CPU mode only, otherwise null
+    private final int maxPlayers;                   // 2..8
+    private final Integer turnTimeoutSeconds;       // null = no limit
     private final GameStatus status;
     private final Integer rounds;
     private final Instant createdAt;

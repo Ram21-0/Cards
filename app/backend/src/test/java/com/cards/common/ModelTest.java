@@ -61,6 +61,7 @@ class ModelTest {
         for (Visibility v : Visibility.values()) assertEquals(v, Visibility.get(v.dbVal()));
         for (ComparisonStrategy c : ComparisonStrategy.values()) assertEquals(c, ComparisonStrategy.get(c.dbVal()));
         for (GameStatus s : GameStatus.values()) assertEquals(s, GameStatus.get(s.dbVal()));
+        for (SeatKind k : SeatKind.values()) assertEquals(k, SeatKind.get(k.dbVal()));
         assertThrows(IllegalArgumentException.class, () -> Visibility.get(99));
     }
 }

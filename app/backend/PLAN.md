@@ -16,8 +16,8 @@ Decks define their own stats; games are played with a deck.
 | `deck_stats` | what each card in the deck holds | `key`, `label`, `unit`, `value_type`, **`comparison_strategy`** (`higher_wins`/`lower_wins`), `display_order` |
 | `cards` | cards of a deck | `stats` jsonb `{"rank":12,"fight":44,…}` (keys must match the deck's `deck_stats`, validated in code); `meta` jsonb for display-only extras (e.g. `brand`) |
 | `players` | accounts | username unique; add `password_hash` in a later migration when auth lands |
-| `games` | one play-through with a deck | `join_code` (shareable), `deck_id`, `host_id`, `mode` (`cpu`/`pvp`), `difficulty` (cpu only), `status` (`waiting`/`in_progress`/`finished`/`abandoned`) |
-| `game_players` | who is in a game | seat 1/2 + `result`; CPU opponent is implied by `mode`; feeds the leaderboard |
+| `games` | one play-through with a deck, 2–8 seats | `join_code` (shareable), `deck_id`, `host_id`, `max_players`, `turn_timeout_seconds` (null = none), `status` (`waiting` lobby → `in_progress` → `finished`/`abandoned`) |
+| `game_players` | the seats of a game | `seat`, `kind` (`HUMAN`/`CPU`), `player_id` (humans), `difficulty` (CPUs), `placement` (1 = winner); feeds the leaderboard |
 
 **Decisions**
 - **Stats + comparison live on the deck**, not on a "game type": a deck fully describes itself, and two wrestling decks may differ.
@@ -30,29 +30,48 @@ Decks define their own stats; games are played with a deck.
   block edits (or copy-on-write into a new deck) while any game on it is `waiting`/`in_progress`.
 - Live round state (hands, pot, whose turn) is not in the DB yet — keep it in memory first; add `games.state jsonb` if you want resume.
 
+## Multiplayer rules (2–8 seats, humans and optional CPUs)
+Defaults — change any of them in one place (the rules engine):
+- **Seats:** the host creates a game with `max_players`; people join with the `join_code`; the host can add CPU seats (each with its own difficulty) and starts the game once there are **≥ 2 seats**.
+- **Deal:** shuffle, deal round-robin. The deck need not divide evenly — some players start with one more card.
+- **Round:** every player still holding cards reveals their top card. The **caller** picks a stat from their own card (first caller: random).
+  The best value under the stat's `comparison_strategy` wins **all revealed cards plus the pot** and becomes the next caller.
+- **Tie for best:** all revealed cards go to the pot and the caller stays. (Alternative later: only the tied players play a tie-break.)
+- **Out:** a player with no cards is eliminated and gets the next-worst `placement`. If the caller is eliminated, the next seat clockwise calls.
+- **End:** one player holds every card → they get `placement` 1. If the last players run out together, they share the placement (draw).
+- **Hidden information:** the server never sends a card to anyone but its holder until it is revealed in a round. Never trust the client for hands.
+- **Turn timeout:** if `turn_timeout_seconds` is set and the caller is slow (or has disconnected), the server picks the stat for them (CPU "Hard" logic).
+- **CPU seats:** the server picks a stat for them using the existing strength-percentile logic; they reveal and play like anyone else.
+
 ## API (in build order)
 1. `GET /api/health` — `{"status":"ok"}` (+ db ping)
-2. `GET /api/decks` — public decks (+ the caller's own); `GET /api/decks/{id}` — deck with its stat definitions;
+2. `GET /api/decks` — public decks (+ the caller's own); `GET /api/decks/{id}` — deck with stat definitions;
    `GET /api/decks/{id}/cards` — `{ id, name, img, stats: {…}, meta: {…} }`
 3. `POST /api/players` `{username}` — create (409 if taken, max 8 chars, lowercased like the Android app)
-4. `POST /api/games` `{deckId, mode, difficulty?}` → `{id, joinCode, joinUrl}`
-5. `GET /api/games/{joinCode}` — status + deck; `POST /api/games/{joinCode}/join` — second player takes seat 2 (pvp)
-6. `POST /api/games/{joinCode}/play {stat}` — server resolves the round (server-authoritative; CPU moves handled server-side)
-7. `GET /api/leaderboard` — wins, games, win rate per player
+4. **Lobby:** `POST /api/games` `{deckId, maxPlayers, turnTimeoutSeconds?}` → `{id, joinCode, joinUrl}` (host takes seat 1);
+   `GET /api/games/{joinCode}` — status, deck, seats; `POST /api/games/{joinCode}/join` — take the next free seat;
+   `POST /api/games/{joinCode}/cpu` `{difficulty}` — host adds a CPU seat; `DELETE …/seats/{n}` — host removes one;
+   `POST /api/games/{joinCode}/start` — host only, needs ≥ 2 seats
+5. **Play:** `POST /api/games/{joinCode}/play` `{stat}` — only the current caller; the server resolves the round (CPUs and timeouts handled server-side)
+6. **Live updates:** a WebSocket (or SSE) channel per game pushes lobby changes, "round resolved" events, and each player's own next card.
+   REST for actions, push for state. `spring-boot-starter-websocket` when you get there.
+7. `GET /api/leaderboard` — wins (`placement = 1`), games, win rate per player
 
 ## Phases
-- [ ] **0 Connect** — follow README, see "Database connected" *(connector is provided)*
-- [ ] **1 Decks + cards** — seed cards into the Wrestling deck (export Firebase `Data`, or the placeholder 54), repositories, `GET /api/decks…`, CORS for the frontend origin
-- [ ] **2 Frontend uses it** — frontend fetches `/api/cards` (keep `data/cards.js` as offline fallback)
-- [ ] **3 Players + games** — usernames, create/record games (`games`, `game_players`), leaderboard screen
-- [ ] **4 Auth** — pick one: (a) username + BCrypt password + JWT, (b) anonymous device token. Start with (b), it's ~1 hour
-- [ ] **5 Server-authoritative games** — port `engine.js` to Java (`Engine`, same rules, same 12 tests in JUnit); game state in memory or a `game_state` row
-- [ ] **6 Optional PvP** — WebSocket lobby, two humans instead of CPU
+- [x] **0 Connect** — local Postgres (5433) works; Neon dev next
+- [ ] **1 Decks + cards** — seed cards into the Wrestling deck (export Firebase `Data`, or the placeholder 54), repositories/row mappers for the model classes, `GET /api/decks…`, CORS for the frontend origin
+- [ ] **2 Frontend uses it** — frontend fetches decks/cards (keep `data/cards.js` as offline fallback) and reads stat definitions instead of the hardcoded `STATS`
+- [ ] **3 Players** — usernames / anonymous device token, `POST /api/players`
+- [ ] **4 Rules engine (pure Java, N players)** — `Engine` with the multiplayer rules above, CPU seat logic, placements; unit-test it hard (3-way ties, caller eliminated, uneven deal, simultaneous elimination, conservation of cards)
+- [ ] **5 Lobby + games** — create/join/add CPU/start, persistence of `games` / `game_players`
+- [ ] **6 Live play** — WebSocket events, turn timeout, reconnect (rebuild a player's view from server state), hidden-information check
+- [ ] **7 Leaderboard**
+- [ ] **8 Frontend: lobby + multiplayer table** — share link, seats list, "add CPU", up to 8 players' card counts; the card component stays as is
 
-## Game rules to port (from `app/frontend/js/engine.js`)
-- Deck dealt alternately; winner takes both cards + any pot and keeps the turn; tie ("clash") → both cards to the pot, turn unchanged; a side with no cards loses; both empty on a clash = draw.
-- Height compares total inches (feet*12+inches). Rank: lower wins. Everything else: higher wins.
-- CPU: for its top card, compute for each stat the fraction of the deck that card beats; pick the best (Easy = random, Normal = best + noise, Hard = best).
+Live round state (hands, pot, caller) lives in memory first; add `games.state jsonb` if you want a game to survive a server restart.
+
+## Rules to carry over from the 2-player frontend engine (`app/frontend/js/engine.js`)
+- Rank-like stats use `lower_wins`; ties go to the pot; the CPU judges each stat by the share of the deck its card beats (Easy = random, Normal = best + noise, Hard = best).
 
 ## Testing
 Unit-test the engine (no Spring). Use `@JdbcTest` or Testcontainers-less approach: point tests at a **Neon branch**
