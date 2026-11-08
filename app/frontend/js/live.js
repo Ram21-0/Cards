@@ -327,8 +327,16 @@ export function pileList(view) {
   return pile.map((c, i) => ({ position: i + 1, id: typeof c === 'object' && c ? c.id ?? null : null, name: typeof c === 'object' && c ? String(c.name ?? '') : String(c) }));
 }
 
-/** Title of that section: with CHOOSE still open nothing is in play yet, so it is the whole pile. */
-export const pileTitle = (view) => (view?.canChoose && !view?.committed ? 'Your pile, in order' : 'Your cards after this turn');
+/**
+ * Title of that section. When no card of yours is in play yet (CHOOSE is open, or will be offered after the stat) the server
+ * lists the WHOLE pile; otherwise it leaves out the card in play. `handSizes` counts the card in play, so comparing the two tells which.
+ */
+export function pileTitle(view, mySeat) {
+  const total = view?.handSizes?.[mySeat];
+  const listed = Array.isArray(view?.ownPile) ? view.ownPile.length : null;
+  if (total != null && listed != null) return listed >= total ? 'Your pile, in order' : 'Your cards after this turn';
+  return view?.canChoose && !view?.committed ? 'Your pile, in order' : 'Your cards after this turn';   // an older server: best guess
+}
 
 /**
  * The feed as lines of text, oldest first. A round that went through a clash is worded as winning the pool,

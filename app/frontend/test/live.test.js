@@ -381,11 +381,17 @@ test('pileList: your own cards in turn order, names only; null when the server d
   assert.deepEqual(pileList({ ownPile: [{ id: 1 }] })[0], { position: 1, id: 1, name: '' });
 });
 
-test('pileTitle: "after this turn" once a card is in play, "your pile" while you can still choose', () => {
-  assert.equal(pileTitle({ canChoose: false }), 'Your cards after this turn');
-  assert.equal(pileTitle({ canChoose: true, committed: null }), 'Your pile, in order');
-  assert.equal(pileTitle({ canChoose: true, committed: { id: 1 } }), 'Your cards after this turn');
-  assert.equal(pileTitle(null), 'Your cards after this turn');
+test('pileTitle: "your pile" when the whole pile is listed, "after this turn" when the card in play is left out', () => {
+  const pile = (n) => Array.from({ length: n }, (_, i) => ({ id: i, name: `C${i}` }));
+  // handSizes counts the card in play: 5 cards in total
+  assert.equal(pileTitle({ handSizes: { 1: 5 }, ownPile: pile(4) }, 1), 'Your cards after this turn');   // the one in play is left out
+  assert.equal(pileTitle({ handSizes: { 1: 5 }, ownPile: pile(5) }, 1), 'Your pile, in order');          // nothing in play yet: whole pile
+  assert.equal(pileTitle({ handSizes: { 1: 1 }, ownPile: pile(0) }, 1), 'Your cards after this turn');   // only the card in play is left
+  // an older server without handSizes: fall back to what we can see
+  assert.equal(pileTitle({ canChoose: true, committed: null, ownPile: pile(3) }, 1), 'Your pile, in order');
+  assert.equal(pileTitle({ canChoose: true, committed: { id: 1 }, ownPile: pile(3) }, 1), 'Your cards after this turn');
+  assert.equal(pileTitle({ canChoose: false }, 1), 'Your cards after this turn');
+  assert.equal(pileTitle(null, 1), 'Your cards after this turn');
 });
 
 test('winning a clash says how many cards were won from the pool; a normal round does not', () => {

@@ -800,7 +800,7 @@ function pileSection(ctx) {
   const rows = pileList(ctx.view);
   if (!rows) return '';                                                   // the server does not send ownPile
   const details = el('details', { class: 'pile' },
-    el('summary', {}, el('span', {}, pileTitle(ctx.view)), el('span', { class: 'pill' }, String(rows.length))),
+    el('summary', {}, el('span', {}, pileTitle(ctx.view, ctx.mySeat)), el('span', { class: 'pill' }, String(rows.length))),
     rows.length
       ? el('ol', {}, rows.map((r, i) => el('li', {}, r.name, i === 0 ? el('em', {}, ' · next') : '')))
       : el('p', { class: 'hint' }, 'No other cards: only the one in play.'));
