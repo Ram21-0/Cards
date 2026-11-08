@@ -1,0 +1,23 @@
+# Per-game rule settings (RULES.md §1). turn_timeout_seconds already exists (001); here it gets its range.
+# Defaults mirror application.yml (app.game.*); the service always writes explicit values.
+databaseChangeLog:
+
+  - changeSet:
+      id: 010-game-settings
+      author: cards
+      changes:
+        - addColumn:
+            tableName: games
+            columns:
+              - column: { name: max_rounds, type: int, defaultValueNumeric: 500, remarks: "safety cap, because cards cycle (20-5000)", constraints: { nullable: false } }
+              - column: { name: choose_threshold, type: smallint, defaultValueNumeric: 3, remarks: "a player with 2..this many cards may CHOOSE; 0 disables (0-10)", constraints: { nullable: false } }
+              - column: { name: clash_call_seconds, type: smallint, defaultValueNumeric: 5, remarks: "time to call a stat in a clash (2-30)", constraints: { nullable: false } }
+        - sql: ALTER TABLE games ADD CONSTRAINT games_max_rounds_check CHECK (max_rounds BETWEEN 20 AND 5000)
+        - sql: ALTER TABLE games ADD CONSTRAINT games_choose_threshold_check CHECK (choose_threshold BETWEEN 0 AND 10)
+        - sql: ALTER TABLE games ADD CONSTRAINT games_clash_call_seconds_check CHECK (clash_call_seconds BETWEEN 2 AND 30)
+        - sql: ALTER TABLE games ADD CONSTRAINT games_turn_timeout_range_check CHECK (turn_timeout_seconds IS NULL OR turn_timeout_seconds BETWEEN 5 AND 120)
+      rollback:
+        - sql: ALTER TABLE games DROP CONSTRAINT games_turn_timeout_range_check
+        - dropColumn: { tableName: games, columnName: clash_call_seconds }
+        - dropColumn: { tableName: games, columnName: choose_threshold }
+        - dropColumn: { tableName: games, columnName: max_rounds }

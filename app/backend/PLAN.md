@@ -31,17 +31,15 @@ Decks define their own stats; games are played with a deck.
 - Live round state (hands, pot, whose turn) is not in the DB yet — keep it in memory first; add `games.state jsonb` if you want resume.
 
 ## Multiplayer rules (2–8 seats, humans and optional CPUs)
-Defaults — change any of them in one place (the rules engine):
-- **Seats:** the host creates a game with `max_players`; people join with the `join_code`; the host can add CPU seats (each with its own difficulty) and starts the game once there are **≥ 2 seats**.
-- **Deal:** shuffle, deal round-robin. The deck need not divide evenly — some players start with one more card.
-- **Round:** every player still holding cards reveals their top card. The **caller** picks a stat from their own card (first caller: random).
-  The best value under the stat's `comparison_strategy` wins **all revealed cards plus the pot** and becomes the next caller.
-- **Tie for best:** all revealed cards go to the pot and the caller stays. (Alternative later: only the tied players play a tie-break.)
-- **Out:** a player with no cards is eliminated and gets the next-worst `placement`. If the caller is eliminated, the next seat clockwise calls.
-- **End:** one player holds every card → they get `placement` 1. If the last players run out together, they share the placement (draw).
-- **Hidden information:** the server never sends a card to anyone but its holder until it is revealed in a round. Never trust the client for hands.
-- **Turn timeout:** if `turn_timeout_seconds` is set and the caller is slow (or has disconnected), the server picks the stat for them (CPU "Hard" logic).
-- **CPU seats:** the server picks a stat for them using the existing strength-percentile logic; they reveal and play like anyone else.
+The authoritative specification is **[RULES.md](RULES.md)** — change it there first, then the code. In short:
+- **Setup:** 2–8 seats (humans and/or CPUs), deck dealt round-robin (uneven is fine), random first caller. Per-game settings (host may override at creation):
+  `maxRounds` (500), `chooseThreshold` (3), `clashCallSeconds` (5), `turnTimeoutSeconds` (none).
+- **A round:** the caller picks a stat, everyone reveals a card, the unique best wins every revealed card (plus any carried pot) at the bottom of their pile and calls next.
+- **Clash** (tie for best): all revealed cards go into a pot; only the tied players continue, racing to call a stat (first call within `clashCallSeconds`, else a random stat); repeats until one wins the whole pot.
+- **CHOOSE:** a player with 2…`chooseThreshold` cards may play any card from their hand once the stat is known.
+- **Elimination / placements** by cards left; **round cap** → most cards wins; **CPU seats** judge stats by deck-share strength (Easy random, Normal noisy, Hard best).
+- **Hidden information:** nobody receives another player's card before it is revealed.
+- **Code:** the pure engine lives in `com.cards.game` (`GameEngine`: commands `choose` / `call` / `tick`, events returned, injectable random source and clock); no Spring or database code in it.
 
 ## API (in build order)
 1. `GET /api/health` — `{"status":"ok"}` (+ db ping)
@@ -51,11 +49,13 @@ Defaults — change any of them in one place (the rules engine):
 3. ~~`POST /api/players`~~ — **removed in stage 2** (it let anyone claim any username). Identity is now Google sign-in; the username is chosen with `PUT /api/me`
    (see *Authentication* below).
 4. **Lobby:**
-   - `POST /api/games` `{"deckId": "<uuid>", "maxPlayers": 4}` → `201` ✅ built — **requires sign-in**; the host is the session's player
+   - `POST /api/games` `{"deckId": "<uuid>", "maxPlayers": 4, "options": { "maxRounds": 500, "chooseThreshold": 3, "clashCallSeconds": 5, "turnTimeoutSeconds": 30 }}` → `201` ✅ built — **requires sign-in**; the host is the session's player.
+     `options` and every field in it are optional (missing = the default from `app.game.*` in application.yml); ranges: maxRounds 20–5000, chooseThreshold 0–10, clashCallSeconds 2–30, turnTimeoutSeconds 5–120 (omit = no limit), else `400 {"error":"maxRounds must be between 20 and 5000"}` etc.
      ```json
      { "id": "<uuid>", "joinCode": "K7Q2XM", "joinUrl": "<frontend base>/?join=K7Q2XM", "status": "WAITING", "maxPlayers": 4,
        "deck": { "id": "<uuid>", "name": "Wrestling" },
-       "seats": [ { "seat": 1, "kind": "HUMAN", "username": "ann", "difficulty": null } ] }
+       "seats": [ { "seat": 1, "kind": "HUMAN", "username": "ann", "difficulty": null } ],
+       "options": { "maxRounds": 500, "chooseThreshold": 3, "clashCallSeconds": 5, "turnTimeoutSeconds": null } }
      ```
      `deckId` required; `maxPlayers` 2–8; the deck must be public/unlisted (else 404) and have at least `maxPlayers` cards (else 400);
      the signed-in host takes seat 1; a `hostId` in the body (old clients) is ignored. `401 {"error":"Sign in required"}` when signed out;
@@ -150,11 +150,11 @@ Defaults — change any of them in one place (the rules engine):
 
 ## Phases
 - [x] **0 Connect** — local Postgres (5433) works; Neon dev next
-- [ ] **1 Decks + cards** — seed cards into the Wrestling deck (export Firebase `Data`, or the placeholder 54), repositories/row mappers for the model classes, `GET /api/decks…`, CORS for the frontend origin
-- [ ] **2 Frontend uses it** — frontend fetches decks/cards (keep `data/cards.js` as offline fallback) and reads stat definitions instead of the hardcoded `STATS`
+- [x] **1 Decks + cards** — seed cards into the Wrestling deck (export Firebase `Data`, or the placeholder 54), repositories/row mappers for the model classes, `GET /api/decks…`, CORS for the frontend origin
+- [x] **2 Frontend uses it** — frontend fetches decks/cards (keep `data/cards.js` as offline fallback) and reads stat definitions instead of the hardcoded `STATS`
 - [x] **3 Players** — Google sign-in, sessions, username (the temporary anonymous `POST /api/players` is gone) — see *Authentication* above
-- [ ] **4 Rules engine (pure Java, N players)** — `Engine` with the multiplayer rules above, CPU seat logic, placements; unit-test it hard (3-way ties, caller eliminated, uneven deal, simultaneous elimination, conservation of cards)
-- [ ] **5 Lobby + games** — create (sign-in), read, join (sign-in) are built; add CPU / start still to do
+- [x] **4 Rules engine (pure Java, N players)** — `com.cards.game.GameEngine` per [RULES.md](RULES.md): rounds, recursive clash with the 5 s race, CHOOSE, elimination/placements, round cap, configurable CPU strategies; tested with the RULES.md §10 checklist and 3000 seeded random games (conservation checked at every step)
+- [ ] **5 Lobby + games** — create (sign-in), read, join (sign-in) are built; add CPU / start (create the `GameEngine` from the seats) still to do
 - [ ] **6 Live play** — WebSocket events, turn timeout, reconnect (rebuild a player's view from server state), hidden-information check
 - [ ] **7 Leaderboard**
 - [ ] **8 Frontend: lobby + multiplayer table** — share link, seats list, "add CPU", up to 8 players' card counts; the card component stays as is

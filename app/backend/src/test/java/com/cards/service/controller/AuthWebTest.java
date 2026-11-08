@@ -14,6 +14,7 @@ import com.cards.config.SecurityConfig;
 import com.cards.config.SessionCookies;
 import com.cards.service.service.AuthService;
 import com.cards.service.service.GameDetails;
+import com.cards.service.service.GameOptions;
 import com.cards.service.service.GameService;
 import com.cards.service.service.SessionService;
 import jakarta.servlet.http.Cookie;
@@ -274,7 +275,7 @@ class AuthWebTest {
     private static final UUID DECK_ID = UUID.randomUUID();
 
     private static GameDetails details(String code) {
-        Game g = Game.builder().id(UUID.randomUUID()).joinCode(code).deckId(DECK_ID).maxPlayers(4).status(GameStatus.WAITING).build();
+        Game g = Game.builder().id(UUID.randomUUID()).joinCode(code).deckId(DECK_ID).maxPlayers(4).maxRounds(500).chooseThreshold(3).clashCallSeconds(5).status(GameStatus.WAITING).build();
         Deck d = Deck.builder().id(DECK_ID).name("Wrestling").visibility(Visibility.PUBLIC).stats(List.of()).build();
         return new GameDetails(g, d, List.of(new SeatInfo(1, SeatKind.HUMAN, "ann", null)));
     }
@@ -286,7 +287,7 @@ class AuthWebTest {
         mvc.perform(post("/api/games").contentType(MediaType.APPLICATION_JSON).content(CREATE_BODY))
                 .andExpect(status().isUnauthorized())
                 .andExpect(jsonPath("$.error").value("Sign in required"));
-        verify(games, never()).create(any(), any(), any());
+        verify(games, never()).create(any(), any(), any(), any());
     }
 
     @Test
@@ -301,24 +302,64 @@ class AuthWebTest {
         mvc.perform(post("/api/games").cookie(GOOD).contentType(MediaType.APPLICATION_JSON).content(CREATE_BODY))
                 .andExpect(status().isForbidden())
                 .andExpect(jsonPath("$.error").value("Missing X-Requested-With header"));
-        verify(games, never()).create(any(), any(), any());
+        verify(games, never()).create(any(), any(), any(), any());
     }
 
     @Test
     void theHostIsTheSessionsPlayerAndAClientSuppliedHostIdIsIgnored() throws Exception {
-        when(games.create(DECK_ID, 4, ANN)).thenReturn(details("K7Q2XM"));
+        when(games.create(DECK_ID, 4, ANN, GameOptions.NONE)).thenReturn(details("K7Q2XM"));
         String body = "{\"deckId\":\"" + DECK_ID + "\",\"maxPlayers\":4,\"hostId\":\"" + UUID.randomUUID() + "\"}";   // impersonation attempt
         mvc.perform(post("/api/games").cookie(GOOD).header("X-Requested-With", "cards").contentType(MediaType.APPLICATION_JSON).content(body))
                 .andExpect(status().isCreated())
                 .andExpect(jsonPath("$.joinCode").value("K7Q2XM"))
                 .andExpect(jsonPath("$.joinUrl").value("http://localhost:8081/?join=K7Q2XM"))
                 .andExpect(jsonPath("$.seats[0].username").value("ann"));
-        verify(games).create(DECK_ID, 4, ANN);
+        verify(games).create(DECK_ID, 4, ANN, GameOptions.NONE);
+    }
+
+    @Test
+    void theHostMayOverrideTheRuleSettingsAndTheResponseReportsTheSettingsOfTheGame() throws Exception {
+        GameOptions wanted = new GameOptions(100, 0, 8, 30);
+        when(games.create(DECK_ID, 4, ANN, wanted)).thenReturn(details("K7Q2XM"));
+        String body = "{\"deckId\":\"" + DECK_ID + "\",\"maxPlayers\":4,\"options\":{\"maxRounds\":100,\"chooseThreshold\":0,\"clashCallSeconds\":8,\"turnTimeoutSeconds\":30}}";
+        mvc.perform(post("/api/games").cookie(GOOD).header("X-Requested-With", "cards").contentType(MediaType.APPLICATION_JSON).content(body))
+                .andExpect(status().isCreated())
+                .andExpect(jsonPath("$.options.maxRounds").value(500))
+                .andExpect(jsonPath("$.options.chooseThreshold").value(3))
+                .andExpect(jsonPath("$.options.clashCallSeconds").value(5))
+                .andExpect(jsonPath("$.options.turnTimeoutSeconds").doesNotExist());           // null in the test fixture: no limit
+        verify(games).create(DECK_ID, 4, ANN, wanted);
+    }
+
+    @Test
+    void partialOptionsKeepTheOtherFieldsUnset() throws Exception {
+        when(games.create(DECK_ID, 4, ANN, new GameOptions(50, null, null, null))).thenReturn(details("K7Q2XM"));
+        String body = "{\"deckId\":\"" + DECK_ID + "\",\"maxPlayers\":4,\"options\":{\"maxRounds\":50}}";
+        mvc.perform(post("/api/games").cookie(GOOD).header("X-Requested-With", "cards").contentType(MediaType.APPLICATION_JSON).content(body))
+                .andExpect(status().isCreated());
+    }
+
+    @Test
+    void anOutOfRangeOptionIsAClearBadRequest() throws Exception {
+        when(games.create(DECK_ID, 4, ANN, new GameOptions(5, null, null, null)))
+                .thenThrow(new com.cards.common.BadRequestException("maxRounds must be between 20 and 5000"));
+        String body = "{\"deckId\":\"" + DECK_ID + "\",\"maxPlayers\":4,\"options\":{\"maxRounds\":5}}";
+        mvc.perform(post("/api/games").cookie(GOOD).header("X-Requested-With", "cards").contentType(MediaType.APPLICATION_JSON).content(body))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.error").value("maxRounds must be between 20 and 5000"));
+    }
+
+    @Test
+    void aWronglyTypedOptionIsABadRequest() throws Exception {
+        String body = "{\"deckId\":\"" + DECK_ID + "\",\"maxPlayers\":4,\"options\":{\"maxRounds\":\"lots\"}}";
+        mvc.perform(post("/api/games").cookie(GOOD).header("X-Requested-With", "cards").contentType(MediaType.APPLICATION_JSON).content(body))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.error").value("Invalid request body"));
     }
 
     @Test
     void aBearerClientCanCreateAGameWithoutTheHeader() throws Exception {
-        when(games.create(DECK_ID, 4, ANN)).thenReturn(details("K7Q2XM"));
+        when(games.create(DECK_ID, 4, ANN, GameOptions.NONE)).thenReturn(details("K7Q2XM"));
         mvc.perform(post("/api/games").header("Authorization", "Bearer good-token").contentType(MediaType.APPLICATION_JSON).content(CREATE_BODY))
                 .andExpect(status().isCreated());
     }

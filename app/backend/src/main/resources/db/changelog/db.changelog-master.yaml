@@ -5,3 +5,5 @@ databaseChangeLog:
       file: db/changelog/changes/001-init.yaml
   - include:
       file: db/changelog/changes/002-auth.yaml
+  - include:
+      file: db/changelog/changes/003-game-settings.yaml

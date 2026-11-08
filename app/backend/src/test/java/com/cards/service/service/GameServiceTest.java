@@ -10,9 +10,11 @@ import com.cards.common.Player;
 import com.cards.common.SeatInfo;
 import com.cards.common.SeatKind;
 import com.cards.common.Visibility;
+import com.cards.game.GameSettings;
 import com.cards.service.db.DeckRepository;
 import com.cards.service.db.GameRepository;
 import org.junit.jupiter.api.Test;
+import org.mockito.ArgumentCaptor;
 
 import java.time.Instant;
 import java.util.List;
@@ -42,7 +44,7 @@ class GameServiceTest {
     private final GameRepository games = mock(GameRepository.class);
     private final DeckService decks = mock(DeckService.class);
     private final DeckRepository deckRepository = mock(DeckRepository.class);
-    private final GameService service = new GameService(games, decks, deckRepository);
+    private final GameService service = new GameService(games, decks, deckRepository, new GameSettings(300, 2, 8, 30));
 
     private static Deck deck(int cardCount) {
         return Deck.builder().id(DECK_ID).name("Wrestling").visibility(Visibility.PUBLIC).cardCount(cardCount).stats(List.of()).build();
@@ -60,40 +62,40 @@ class GameServiceTest {
 
     @Test
     void deckIdIsRequired() {
-        assertThrows(BadRequestException.class, () -> service.create(null, 4, ANN));
+        assertThrows(BadRequestException.class, () -> service.create(null, 4, ANN, GameOptions.NONE));
         verifyNoInteractions(games, decks);
     }
 
     @Test
     void maxPlayersMustBeBetweenTwoAndEight() {
         for (Integer bad : new Integer[]{null, 0, 1, 9, 100}) {
-            assertThrows(BadRequestException.class, () -> service.create(DECK_ID, bad, ANN), "maxPlayers " + bad);
+            assertThrows(BadRequestException.class, () -> service.create(DECK_ID, bad, ANN, GameOptions.NONE), "maxPlayers " + bad);
         }
         verifyNoInteractions(games, decks);
         // the edges are fine
         when(decks.get(DECK_ID)).thenReturn(deck(54));
-        when(games.insertIfCodeFree(anyString(), any(), any(), anyInt())).thenAnswer(i -> Optional.of(game(i.getArgument(0), 4, GameStatus.WAITING)));
-        service.create(DECK_ID, 2, ANN);
-        service.create(DECK_ID, 8, ANN);
+        when(games.insertIfCodeFree(anyString(), any(), any(), anyInt(), any())).thenAnswer(i -> Optional.of(game(i.getArgument(0), 4, GameStatus.WAITING)));
+        service.create(DECK_ID, 2, ANN, GameOptions.NONE);
+        service.create(DECK_ID, 8, ANN, GameOptions.NONE);
     }
 
     @Test
     void deckNeedsAtLeastOneCardPerPlayer() {
         when(decks.get(DECK_ID)).thenReturn(deck(3));
-        BadRequestException e = assertThrows(BadRequestException.class, () -> service.create(DECK_ID, 4, ANN));
+        BadRequestException e = assertThrows(BadRequestException.class, () -> service.create(DECK_ID, 4, ANN, GameOptions.NONE));
         assertEquals("This deck has 3 cards; 4 players need at least 4", e.getMessage());
-        verify(games, never()).insertIfCodeFree(anyString(), any(), any(), anyInt());
+        verify(games, never()).insertIfCodeFree(anyString(), any(), any(), anyInt(), any());
     }
 
     @Test
     void unknownOrPrivateDeckIsNotFound() {
         when(decks.get(DECK_ID)).thenThrow(new NotFoundException("Deck not found"));
-        assertThrows(NotFoundException.class, () -> service.create(DECK_ID, 4, ANN));
+        assertThrows(NotFoundException.class, () -> service.create(DECK_ID, 4, ANN, GameOptions.NONE));
     }
 
     @Test
     void thePlayerMustHaveChosenAUsername() {
-        BadRequestException e = assertThrows(BadRequestException.class, () -> service.create(DECK_ID, 4, NO_NAME));
+        BadRequestException e = assertThrows(BadRequestException.class, () -> service.create(DECK_ID, 4, NO_NAME, GameOptions.NONE));
         assertEquals("Choose a username first", e.getMessage());
         verifyNoInteractions(games, decks);
     }
@@ -102,11 +104,11 @@ class GameServiceTest {
     void theSignedInHostIsTheGameHostAndTakesSeatOne() {
         when(decks.get(DECK_ID)).thenReturn(deck(54));
         Game created = game("K7Q2XM", 4, GameStatus.WAITING);
-        when(games.insertIfCodeFree(anyString(), eq(DECK_ID), eq(ANN.id()), eq(4))).thenReturn(Optional.of(created));
+        when(games.insertIfCodeFree(anyString(), eq(DECK_ID), eq(ANN.id()), eq(4), any())).thenReturn(Optional.of(created));
         List<SeatInfo> seats = List.of(seat(1, "ann"));
         when(games.findSeats(created.id())).thenReturn(seats);
 
-        GameDetails d = service.create(DECK_ID, 4, ANN);
+        GameDetails d = service.create(DECK_ID, 4, ANN, GameOptions.NONE);
 
         verify(games).addHumanSeat(created.id(), 1, ANN.id());
         assertEquals(seats, d.seats());
@@ -116,19 +118,65 @@ class GameServiceTest {
     @Test
     void retriesWithAnotherCodeOnCollision() {
         when(decks.get(DECK_ID)).thenReturn(deck(54));
-        when(games.insertIfCodeFree(anyString(), any(), any(), anyInt()))
+        when(games.insertIfCodeFree(anyString(), any(), any(), anyInt(), any()))
                 .thenReturn(Optional.empty())
                 .thenReturn(Optional.empty())
                 .thenAnswer(i -> Optional.of(game(i.getArgument(0), 4, GameStatus.WAITING)));
-        service.create(DECK_ID, 4, ANN);
-        verify(games, times(3)).insertIfCodeFree(anyString(), any(), any(), anyInt());
+        service.create(DECK_ID, 4, ANN, GameOptions.NONE);
+        verify(games, times(3)).insertIfCodeFree(anyString(), any(), any(), anyInt(), any());
     }
 
     @Test
     void givesUpWhenNoCodeIsFree() {
         when(decks.get(DECK_ID)).thenReturn(deck(54));
-        when(games.insertIfCodeFree(anyString(), any(), any(), anyInt())).thenReturn(Optional.empty());
-        assertThrows(IllegalStateException.class, () -> service.create(DECK_ID, 4, ANN));
+        when(games.insertIfCodeFree(anyString(), any(), any(), anyInt(), any())).thenReturn(Optional.empty());
+        assertThrows(IllegalStateException.class, () -> service.create(DECK_ID, 4, ANN, GameOptions.NONE));
+    }
+
+    // ------------------------------------------------------------ the rule settings (RULES.md §1)
+
+    private GameSettings createdWith(GameOptions options) {
+        when(decks.get(DECK_ID)).thenReturn(deck(54));
+        when(games.insertIfCodeFree(anyString(), any(), any(), anyInt(), any())).thenAnswer(i -> Optional.of(game(i.getArgument(0), 4, GameStatus.WAITING)));
+        service.create(DECK_ID, 4, ANN, options);
+        ArgumentCaptor<GameSettings> captured = ArgumentCaptor.forClass(GameSettings.class);
+        verify(games).insertIfCodeFree(anyString(), eq(DECK_ID), eq(ANN.id()), eq(4), captured.capture());
+        return captured.getValue();
+    }
+
+    @Test
+    void withoutOptionsTheDefaultsFromTheConfigurationAreUsed() {
+        assertEquals(new GameSettings(300, 2, 8, 30), createdWith(GameOptions.NONE));
+    }
+
+    @Test
+    void aMissingOptionsObjectMeansTheSameAsEmptyOptions() {
+        assertEquals(new GameSettings(300, 2, 8, 30), createdWith(null));
+    }
+
+    @Test
+    void theHostsOverridesWinAndTheRestKeepTheDefaults() {
+        assertEquals(new GameSettings(100, 2, 8, 30), createdWith(new GameOptions(100, null, null, null)));
+    }
+
+    @Test
+    void zeroIsARealOverride() {
+        assertEquals(new GameSettings(300, 0, 8, 30), createdWith(new GameOptions(null, 0, null, null)), "CHOOSE switched off");
+    }
+
+    @Test
+    void everyOverrideIsRangeCheckedBeforeAnythingIsCreated() {
+        String[][] bad = {{"maxRounds must be between 20 and 5000", "19", "x", "x", "x"}, {"chooseThreshold must be between 0 and 10", "x", "11", "x", "x"},
+                {"clashCallSeconds must be between 2 and 30", "x", "x", "1", "x"}, {"turnTimeoutSeconds must be between 5 and 120", "x", "x", "x", "4"}};
+        GameOptions[] options = {new GameOptions(19, null, null, null), new GameOptions(null, 11, null, null),
+                new GameOptions(null, null, 1, null), new GameOptions(null, null, null, 4)};
+        for (int i = 0; i < options.length; i++) {
+            GameOptions o = options[i];
+            BadRequestException e = assertThrows(BadRequestException.class, () -> service.create(DECK_ID, 4, ANN, o));
+            assertEquals(bad[i][0], e.getMessage());
+        }
+        verify(games, never()).insertIfCodeFree(anyString(), any(), any(), anyInt(), any());
+        verify(games, never()).addHumanSeat(any(), anyInt(), any());
     }
 
     // ------------------------------------------------------------ join

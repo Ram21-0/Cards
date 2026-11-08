@@ -104,6 +104,16 @@ The full design and the endpoint contract are in `PLAN.md` ("Authentication").
   ```
 - **Tests never call Google:** the token verifier is an interface; tests use a fake, and the real verifier is exercised offline with throwaway keys.
 
+## Game rules engine
+The multiplayer rules live in `com.cards.game` (pure Java: no Spring, no database, no wall clock). The specification is [RULES.md](RULES.md);
+`GameEngine` is a state machine with the commands `choose`, `call` and `tick`, returns the events each one caused, and takes an injectable
+random source and clock, so a game replays exactly from its seed. Tests: `mvn test` (rules scenarios, CPU strategies, 3000 seeded random games).
+
+Configuration in `application.yml` (`app.game.*`; any value can be overridden by an environment variable such as `APP_GAME_MAX_ROUNDS=300`):
+- `max-rounds`, `choose-threshold`, `clash-call-seconds` (and optionally `turn-timeout-seconds`): the defaults for new games, which the host may override in `POST /api/games` `options`.
+- `cpu.easy|medium|hard.strategy` (`random`, `deck-percentile`, `opponent-percentile`, `smart`) and `.noise` (0–1): how each CPU difficulty plays (see RULES.md §7).
+An invalid value stops the application at startup with a clear message.
+
 ## Production build (frontend + API in one jar)
 ```bash
 mvn -Pbundle-frontend package          # copies app/frontend into the jar; java -jar target/cards-backend-*.jar serves the site at / and the API at /api

@@ -8,6 +8,7 @@ import com.cards.common.GameStatus;
 import com.cards.common.NotFoundException;
 import com.cards.common.Player;
 import com.cards.common.SeatInfo;
+import com.cards.game.GameSettings;
 import com.cards.service.db.DeckRepository;
 import com.cards.service.db.GameRepository;
 import lombok.RequiredArgsConstructor;
@@ -31,15 +32,18 @@ public class GameService {
     private final GameRepository games;
     private final DeckService decks;
     private final DeckRepository deckRepository;
+    private final GameSettings defaultSettings;                 // from application.yml (app.game.*)
 
     /** Creates a WAITING game. The signed-in host (never a client-supplied id) takes seat 1. */
     @Transactional
-    public GameDetails create(UUID deckId, Integer maxPlayers, Player host) {
+    public GameDetails create(UUID deckId, Integer maxPlayers, Player host, GameOptions options) {
         requireUsername(host);
         if (deckId == null) throw new BadRequestException("deckId is required");
         if (maxPlayers == null || maxPlayers < MIN_PLAYERS || maxPlayers > MAX_PLAYERS) {
             throw new BadRequestException("maxPlayers must be between " + MIN_PLAYERS + " and " + MAX_PLAYERS);
         }
+
+        GameSettings settings = settingsFor(options);               // 400 when an override is out of range
 
         Deck deck = decks.get(deckId);                              // 404 when unknown or private
         int cardCount = deck.cardCount() == null ? 0 : deck.cardCount();
@@ -47,7 +51,7 @@ public class GameService {
             throw new BadRequestException("This deck has " + cardCount + " cards; " + maxPlayers + " players need at least " + maxPlayers);
         }
 
-        Game game = insertWithFreeCode(deckId, host.id(), maxPlayers);
+        Game game = insertWithFreeCode(deckId, host.id(), maxPlayers, settings);
         games.addHumanSeat(game.id(), 1, host.id());
         return new GameDetails(game, deck, games.findSeats(game.id()));
     }
@@ -104,9 +108,19 @@ public class GameService {
                 .orElseThrow(() -> new NotFoundException("Deck of game " + code + " not found"));
     }
 
-    private Game insertWithFreeCode(UUID deckId, UUID hostId, int maxPlayers) {
+    /** The host's overrides on top of the defaults, range-checked (RULES.md §1). */
+    private GameSettings settingsFor(GameOptions options) {
+        GameOptions o = options == null ? GameOptions.NONE : options;
+        try {
+            return GameSettings.resolve(o.maxRounds(), o.chooseThreshold(), o.clashCallSeconds(), o.turnTimeoutSeconds(), defaultSettings);
+        } catch (IllegalArgumentException e) {
+            throw new BadRequestException(e.getMessage());
+        }
+    }
+
+    private Game insertWithFreeCode(UUID deckId, UUID hostId, int maxPlayers, GameSettings settings) {
         for (int attempt = 0; attempt < CODE_ATTEMPTS; attempt++) {
-            var created = games.insertIfCodeFree(JoinCodes.next(), deckId, hostId, maxPlayers);
+            var created = games.insertIfCodeFree(JoinCodes.next(), deckId, hostId, maxPlayers, settings);
             if (created.isPresent()) return created.get();
         }
         throw new IllegalStateException("Could not find a free join code");

@@ -13,6 +13,18 @@ spring:
     change-log: classpath:db/changelog/db.changelog-master.yaml
 
 app:
+  game:
+    # Defaults for new games; the host may override max-rounds, choose-threshold, clash-call-seconds and
+    # turn-timeout-seconds when creating a game. (turn-timeout-seconds: none unless set here.) See RULES.md.
+    max-rounds: 500
+    choose-threshold: 3
+    clash-call-seconds: 5
+    # How each CPU difficulty plays. strategy: random | deck-percentile | opponent-percentile | smart.
+    # noise (0..1) mixes random noise into the judgement; 0 = always the best option. See RULES.md §7.
+    cpu:
+      easy:   { strategy: random,              noise: 0 }
+      medium: { strategy: opponent-percentile, noise: 0.25 }
+      hard:   { strategy: smart,               noise: 0 }
   google-client-id: ${GOOGLE_CLIENT_ID:}      # empty = Google sign-in answers 503 "not configured". Put it in .env.<APP_ENV>.
   session:
     ttl-days: 30

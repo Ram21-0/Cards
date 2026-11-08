@@ -20,6 +20,9 @@ public class Game {
     private final UUID deckId;
     private final UUID hostId;                      // null = anonymous host
     private final int maxPlayers;                   // 2..8
+    private final int maxRounds;                    // rule settings, see RULES.md §1
+    private final int chooseThreshold;
+    private final int clashCallSeconds;
     private final Integer turnTimeoutSeconds;       // null = no limit
     private final GameStatus status;
     private final Integer rounds;

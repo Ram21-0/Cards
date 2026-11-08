@@ -31,7 +31,7 @@ public class GameController {
     @PostMapping
     @ResponseStatus(HttpStatus.CREATED)
     public GameResponse create(@AuthenticationPrincipal Player me, @RequestBody CreateGameRequest request) {
-        return GameResponse.from(games.create(request.deckId(), request.maxPlayers(), me), frontendBaseUrl);
+        return GameResponse.from(games.create(request.deckId(), request.maxPlayers(), me, request.gameOptions()), frontendBaseUrl);
     }
 
     /** Takes the next free seat; responds with the same body as GET. 409 when full / started; 200 again if already seated. */

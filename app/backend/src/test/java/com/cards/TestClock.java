@@ -23,6 +23,11 @@ public class TestClock extends Clock {
         now = now.plus(d);
     }
 
+    /** Jumps to an exact instant (never backwards in a well-behaved test). */
+    public void set(Instant instant) {
+        now = instant;
+    }
+
     @Override
     public ZoneId getZone() {
         return ZoneOffset.UTC;

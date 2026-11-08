@@ -5,6 +5,7 @@ import com.cards.common.Game;
 import com.cards.common.GameStatus;
 import com.cards.common.SeatInfo;
 import com.cards.common.SeatKind;
+import com.cards.game.GameSettings;
 import lombok.RequiredArgsConstructor;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.jdbc.core.RowMapper;
@@ -31,6 +32,9 @@ public class GameRepository {
             .deckId(rs.getObject("deck_id", UUID.class))
             .hostId(rs.getObject("host_id", UUID.class))
             .maxPlayers(rs.getInt("max_players"))
+            .maxRounds(rs.getInt("max_rounds"))
+            .chooseThreshold(rs.getInt("choose_threshold"))
+            .clashCallSeconds(rs.getInt("clash_call_seconds"))
             .turnTimeoutSeconds(rs.getObject("turn_timeout_seconds", Integer.class))
             .status(GameStatus.get(rs.getInt("status")))
             .rounds(rs.getObject("rounds", Integer.class))
@@ -52,11 +56,13 @@ public class GameRepository {
      * Creates a WAITING game. Returns empty when the join code is already used. Done with ON CONFLICT instead of
      * catching a unique-violation, because a violation would abort the surrounding Postgres transaction.
      */
-    public Optional<Game> insertIfCodeFree(String joinCode, UUID deckId, UUID hostId, int maxPlayers) {
+    public Optional<Game> insertIfCodeFree(String joinCode, UUID deckId, UUID hostId, int maxPlayers, GameSettings settings) {
         return jdbc.query("""
-                        insert into games (join_code, deck_id, host_id, max_players) values (?, ?, ?, ?)
+                        insert into games (join_code, deck_id, host_id, max_players, max_rounds, choose_threshold, clash_call_seconds, turn_timeout_seconds)
+                        values (?, ?, ?, ?, ?, ?, ?, ?)
                         on conflict (join_code) do nothing returning *""",
-                GAME, joinCode, deckId, hostId, maxPlayers).stream().findFirst();
+                GAME, joinCode, deckId, hostId, maxPlayers, settings.maxRounds(), settings.chooseThreshold(),
+                settings.clashCallSeconds(), settings.turnTimeoutSeconds()).stream().findFirst();
     }
 
     public Optional<Game> findByJoinCode(String joinCode) {
