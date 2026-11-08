@@ -130,11 +130,43 @@ final class CpuPlayer {
      * percentile among the cards the CPU does not hold).
      */
     private double expectedValue(Card card, int statIndex, Situation sit, Set<Integer> own) {
-        double beatOne = pool(card, statIndex, own).beatenOrTied();
-        double p = Math.pow(beatOne, Math.max(1, sit.opponents()));
-        double prize = Math.max(1, sit.opponents()) + sit.potSize();
+        Pool pool = pool(card, statIndex, own);
+        int n = Math.max(1, sit.opponents());
+        double prize = n + sit.potSize();
         double cost = 1 + keepValue(card, own);
+        if (pool.better() == 0 && pool.equal() > 0) return hopefulTieValue(card, sit, own, pool, n, prize, cost);
+        double p = Math.pow(pool.beatenOrTied(), n);
         return p * prize - (1 - p) * cost;
+    }
+
+    /**
+     * The card cannot beat anything on this stat but can tie, and a tie means a clash. The tie is therefore not "half a
+     * win": it is worth the chance of winning the clash, which depends on how strong the CPU's OTHER cards are overall
+     * (the clash is played with a later card and a stat the CPU may pick, so one stat tells nothing). Strong cards
+     * behind this one make the tie valuable, so a strong card is not given away; weak ones make it a losing bet.
+     * value = P(tie) × (clashWin × clashPrize − (1 − clashWin) × clashCost) − P(lose outright) × cost
+     */
+    private double hopefulTieValue(Card card, Situation sit, Set<Integer> own, Pool pool, int n, double prize, double cost) {
+        double pTie = Math.pow(pool.equal(), n);                           // nobody beats it (better = 0), all opponents tie
+        double pLose = 1 - Math.pow(pool.better() + pool.equal(), n);
+        double clashWin = overallStrength(card, sit, own);
+        double clashPrize = prize + 1;                                      // the clash cards are added to the pot
+        double clashCost = cost + 1;                                        // a lost clash costs this card and the next
+        return pTie * (clashWin * clashPrize - (1 - clashWin) * clashCost) - pLose * cost;
+    }
+
+    /** 0..1: the average over the CPU's other cards of their best stat (beating or tying the cards it does not hold). */
+    private double overallStrength(Card exclude, Situation sit, Set<Integer> own) {
+        double sum = 0;
+        int count = 0;
+        for (Card other : sit.ownCards()) {
+            if (other.id() == exclude.id()) continue;
+            double best = 0;
+            for (int s = 0; s < stats.size(); s++) best = Math.max(best, pool(other, s, own).beatenOrTied());
+            sum += best;
+            count++;
+        }
+        return count == 0 ? 0 : sum / count;
     }
 
     /** 0..1: how strong the card's best stat is among the cards the CPU does not hold — how much it wants to keep it. */

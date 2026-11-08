@@ -153,6 +153,22 @@ class CpuPlayerTest {
     }
 
     @Test
+    void smartKeepsAStrongCardThatCanTieWhenTheCardsBehindItCanWinTheClash() {
+        // power: X can only tie (5 vs 5,5,9,9); Y and the others cannot even tie. X is a keeper (best speed in the deck).
+        Card x = card(1, 5, 1), y = card(2, 1, 9), z = card(3, 1, 1), w = card(4, 1, 1);
+        List<Card> opponents = List.of(card(20, 5, 5), card(21, 5, 5), card(22, 9, 5), card(23, 9, 5));
+        List<Card> strongBehind = List.of(x, y, z, w);
+        assertEquals(0, cpu(CpuStrategy.SMART, 0, 1, all(strongBehind, opponents))
+                        .pickCardForStat(strongBehind, POWER, DifficultyLevel.hard, sit(strongBehind, 1)),
+                "strong cards behind it make the tie worth playing: the strong X is not given away");
+
+        Card y2 = card(5, 1, 9);
+        List<Card> weakBehind = List.of(x, y, y2);
+        int given = cpu(CpuStrategy.SMART, 0, 1, all(weakBehind, opponents)).pickCardForStat(weakBehind, POWER, DifficultyLevel.hard, sit(weakBehind, 1));
+        assertTrue(given != 0, "nothing strong behind it: the tie is a losing bet and a scrap card is given away instead");
+    }
+
+    @Test
     void smartPlaysTheCardThatWinsWhenARoundCanBeWon() {
         Card winner = card(1, 10, 5), other = card(2, 2, 5);
         List<Card> own = List.of(other, winner);

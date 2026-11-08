@@ -493,7 +493,11 @@ class LiveGameIntegrationTest {
         scheduler.advance(java.time.Duration.ofSeconds(4));
         Thread.sleep(100);
         assertTrue(ann.ws.all().stream().noneMatch(LiveGameIntegrationTest::hasAutoEvent), "nothing has timed out yet");
-        scheduler.advance(java.time.Duration.ofSeconds(1));
+        // a CPU may act first (a clash race it joins), which restarts the humans' clock: keep time moving until the clock plays a move
+        for (int i = 0; i < 20 && ann.ws.all().stream().noneMatch(LiveGameIntegrationTest::hasAutoEvent); i++) {
+            scheduler.advance(java.time.Duration.ofSeconds(1));
+            Thread.sleep(20);
+        }
 
         for (Human h : new Human[]{ann, bob}) {
             JsonNode events = h.ws.await(LiveGameIntegrationTest::hasAutoEvent, 5_000);
