@@ -20,7 +20,7 @@ import java.util.List;
  * so we convert. A ready-made "jdbc:" URL is also accepted (then set DB_USER / DB_PASSWORD).
  *
  * Defining this DataSource bean makes Spring Boot skip its own auto-configured one;
- * Flyway and JdbcTemplate pick this one up automatically.
+ * Liquibase and JdbcTemplate pick this one up automatically.
  */
 @Configuration
 public class DatabaseConfig {

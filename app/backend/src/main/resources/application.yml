@@ -8,8 +8,8 @@ spring:
     import:
       - optional:classpath:/${APP_ENV:local}/application.yml
       - optional:file:.env.${APP_ENV:local}[.properties]
-  flyway:
-    enabled: true
+  liquibase:
+    change-log: classpath:db/changelog/db.changelog-master.yaml
 
 server:
   port: ${PORT:8080}

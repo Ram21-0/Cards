@@ -9,7 +9,7 @@ see [PLAN.md](PLAN.md) for what to build and in what order.
    Pick the region closest to where the server will run; Postgres 16 or 17 is fine.
 2. **Get the connection string:** project dashboard → **Connect**. Choose your branch (`main`), the
    default database (`neondb`) and role, and **untick "Connection pooling"** so you get the *direct*
-   host (Flyway migrations need a direct connection; the pooled `-pooler` host can be used for the app later).
+   host (Liquibase needs a direct connection to take its lock; the pooled `-pooler` host can be used for the app later).
    Copy the string — it looks like  
    `postgresql://USER:PASSWORD@ep-xxxx.REGION.aws.neon.tech/neondb?sslmode=require`
 3. **Save it locally:**
@@ -24,10 +24,10 @@ see [PLAN.md](PLAN.md) for what to build and in what order.
    ```bash
    mvn spring-boot:run
    ```
-   Expected log lines: Flyway applying `V1__init.sql`, then  
+   Expected log lines: Liquibase running the changeSets in `db/changelog/changes/001-init.yaml` (players, decks, …, seed), then  
    `Database connected: db=neondb, PostgreSQL 16.x ...`
    The first start can take a few seconds if Neon's compute was asleep.
-6. **Check in Neon:** console → **Tables** (or SQL Editor: `select * from flyway_schema_history;`) —
+6. **Check in Neon:** console → **Tables** (or SQL Editor: `select id, filename from databasechangelog;`) —
    you should see `cards`, `players`, `games`.
 
 Troubleshooting
@@ -63,7 +63,7 @@ src/main/java/com/cards
 src/main/resources
 ├── application.yml                common settings; imports local/ or prod/ + the .env file
 ├── local/ , prod/                 per-environment non-secret settings (log level, CORS origins)
-└── db/migration/V1__init.sql      schema + built-in Wrestling deck
+└── db/changelog/                  db.changelog-master.yaml (includes) + changes/001-init.yaml: schema + built-in Wrestling deck
 
 src/test/java/com/cards/common     ModelTest
 ```
@@ -72,7 +72,7 @@ Request flow: `controller` (HTTP, DTOs) → `service` (rules) → `db` (SQL) →
 Working today: `GET /api/health`, `GET /api/decks`, `GET /api/decks/{id}`, `GET /api/decks/{id}/cards`
 (the cards table is empty until you seed it). Everything marked "stub" is a placeholder for the next phases in PLAN.md.
 
-How the pieces fit: `DatabaseConfig` defines the one `DataSource` bean → Spring Boot's Flyway runs the
+How the pieces fit: `DatabaseConfig` defines the one `DataSource` bean → Spring Boot's Liquibase runs the
 migrations with it → anything you write that takes a `DataSource` or `JdbcTemplate` gets the same pool.
 
 You will add (suggested package layout, details in PLAN.md):
@@ -84,3 +84,9 @@ com.cards
 ├── game/      Engine (port of frontend/js/engine.js), GameService, GameController
 └── web/       CORS config, error handling
 ```
+
+## Changing the schema (Liquibase)
+- Add a new file `src/main/resources/db/changelog/changes/002-something.yaml` and `include` it at the end of `db.changelog-master.yaml`.
+- Never edit a changeSet that has already run on a shared database (Liquibase checks a checksum and will refuse to start). While nothing is deployed, `001-init.yaml` may still be edited — then drop and recreate your local database.
+- Open-source Liquibase has no CHECK-constraint change, so checks are written as `- sql: ALTER TABLE … ADD CONSTRAINT … CHECK (…)`.
+- Each changeSet has a `rollback:`; roll back with `mvn liquibase:rollback` (needs the liquibase-maven-plugin) or by hand.

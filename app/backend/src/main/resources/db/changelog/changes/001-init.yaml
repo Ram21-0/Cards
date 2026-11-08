@@ -1,0 +1,218 @@
+# Card-game schema: decks define their own stats; games are played with a deck (2..8 seats, humans and/or CPUs).
+# Nothing is deployed yet, so this file may still be edited freely; after the first shared run add 002-....yaml.
+#
+# Enum-like columns are smallint codes that mirror the Java DbEnum constants in com.cards.common:
+#   visibility          0 PRIVATE, 1 UNLISTED, 2 PUBLIC                   (Visibility)
+#   value_type          0 INT, 1 DECIMAL                                  (ValueType)
+#   comparison_strategy 0 HIGHER_WINS, 1 LOWER_WINS                       (ComparisonStrategy)
+#   kind (seat)         0 HUMAN, 1 CPU                                    (SeatKind)
+#   difficulty (CPU)    0 easy, 1 medium, 2 hard                          (DifficultyLevel)
+#   status              0 WAITING, 1 IN_PROGRESS, 2 FINISHED, 3 ABANDONED (GameStatus)
+#
+# CHECK constraints use <sql> because open-source Liquibase has no addCheckConstraint change.
+databaseChangeLog:
+
+  # ---------------------------------------------------------------- players
+  - changeSet:
+      id: 001-players
+      author: cards
+      changes:
+        - createTable:
+            tableName: players
+            columns:
+              - column: { name: id, type: uuid, defaultValueComputed: gen_random_uuid(), constraints: { primaryKey: true, primaryKeyName: players_pkey, nullable: false } }
+              - column: { name: username, type: text, constraints: { nullable: false, unique: true, uniqueConstraintName: players_username_key } }
+              - column: { name: created_at, type: timestamp with time zone, defaultValueComputed: now(), constraints: { nullable: false } }
+      rollback:
+        - dropTable: { tableName: players }
+
+  # ---------------------------------------------------------------- decks
+  # A set of cards that can be played. Owns the definition of what its cards hold (deck_stats).
+  # visibility: 2 public = listed for everyone, 1 unlisted = anyone with the link, 0 private = owner only.
+  # owner_id is null for platform-provided decks (e.g. the built-in Wrestling deck).
+  - changeSet:
+      id: 002-decks
+      author: cards
+      changes:
+        - createTable:
+            tableName: decks
+            columns:
+              - column: { name: id, type: uuid, defaultValueComputed: gen_random_uuid(), constraints: { primaryKey: true, primaryKeyName: decks_pkey, nullable: false } }
+              - column: { name: name, type: text, constraints: { nullable: false } }
+              - column: { name: description, type: text }
+              - column: { name: visibility, type: smallint, defaultValueNumeric: 0, constraints: { nullable: false } }
+              - column: { name: owner_id, type: uuid }
+              - column: { name: created_at, type: timestamp with time zone, defaultValueComputed: now(), constraints: { nullable: false } }
+              - column: { name: updated_at, type: timestamp with time zone, defaultValueComputed: now(), constraints: { nullable: false } }
+        - addForeignKeyConstraint:
+            constraintName: decks_owner_id_fkey
+            baseTableName: decks
+            baseColumnNames: owner_id
+            referencedTableName: players
+            referencedColumnNames: id
+            onDelete: CASCADE
+        - sql: ALTER TABLE decks ADD CONSTRAINT decks_visibility_check CHECK (visibility IN (0, 1, 2))
+        - createIndex: { indexName: decks_owner_idx, tableName: decks, columns: [ { column: { name: owner_id } } ] }
+        - createIndex: { indexName: decks_visibility_idx, tableName: decks, columns: [ { column: { name: visibility } } ] }
+      rollback:
+        - dropTable: { tableName: decks }
+
+  # ---------------------------------------------------------------- deck_stats
+  # The stats every card in the deck holds, and how each is compared (direction lives here, in the DB).
+  - changeSet:
+      id: 003-deck-stats
+      author: cards
+      changes:
+        - createTable:
+            tableName: deck_stats
+            columns:
+              - column: { name: id, type: int, autoIncrement: true, constraints: { primaryKey: true, primaryKeyName: deck_stats_pkey, nullable: false } }
+              - column: { name: deck_id, type: uuid, constraints: { nullable: false } }
+              - column: { name: key, type: text, remarks: "'rank', 'runs', ... (key inside cards.stats)", constraints: { nullable: false } }
+              - column: { name: label, type: text, remarks: shown on the card, constraints: { nullable: false } }
+              - column: { name: unit, type: text, remarks: "'lbs', 'in', '%' ... (nullable)" }
+              - column: { name: value_type, type: smallint, defaultValueNumeric: 0, constraints: { nullable: false } }
+              - column: { name: comparison_strategy, type: smallint, constraints: { nullable: false } }
+              - column: { name: display_order, type: smallint, defaultValueNumeric: 0, remarks: order stats appear on the card, constraints: { nullable: false } }
+        - addForeignKeyConstraint:
+            constraintName: deck_stats_deck_id_fkey
+            baseTableName: deck_stats
+            baseColumnNames: deck_id
+            referencedTableName: decks
+            referencedColumnNames: id
+            onDelete: CASCADE
+        - addUniqueConstraint: { constraintName: deck_stats_deck_id_key_key, tableName: deck_stats, columnNames: "deck_id, key" }
+        - sql: ALTER TABLE deck_stats ADD CONSTRAINT deck_stats_value_type_check CHECK (value_type IN (0, 1))
+        - sql: ALTER TABLE deck_stats ADD CONSTRAINT deck_stats_comparison_strategy_check CHECK (comparison_strategy IN (0, 1))
+      rollback:
+        - dropTable: { tableName: deck_stats }
+
+  # ---------------------------------------------------------------- cards
+  # Anything comparable goes in stats (keys must match deck_stats.key — validated in code);
+  # display-only extras (e.g. wrestling brand colour) go in meta.
+  - changeSet:
+      id: 004-cards
+      author: cards
+      changes:
+        - createTable:
+            tableName: cards
+            columns:
+              - column: { name: id, type: int, autoIncrement: true, constraints: { primaryKey: true, primaryKeyName: cards_pkey, nullable: false } }
+              - column: { name: deck_id, type: uuid, constraints: { nullable: false } }
+              - column: { name: name, type: text, constraints: { nullable: false } }
+              - column: { name: img_url, type: text }
+              - column: { name: stats, type: jsonb, remarks: '{"rank": 12, "fight": 44, ...}', constraints: { nullable: false } }
+              - column: { name: meta, type: jsonb, defaultValueComputed: "'{}'::jsonb", constraints: { nullable: false } }
+        - addForeignKeyConstraint:
+            constraintName: cards_deck_id_fkey
+            baseTableName: cards
+            baseColumnNames: deck_id
+            referencedTableName: decks
+            referencedColumnNames: id
+            onDelete: CASCADE
+        - addUniqueConstraint: { constraintName: cards_deck_id_name_key, tableName: cards, columnNames: "deck_id, name" }
+        - sql: ALTER TABLE cards ADD CONSTRAINT cards_stats_check CHECK (jsonb_typeof(stats) = 'object')
+        - sql: ALTER TABLE cards ADD CONSTRAINT cards_meta_check CHECK (jsonb_typeof(meta) = 'object')
+        - createIndex: { indexName: cards_deck_idx, tableName: cards, columns: [ { column: { name: deck_id } } ] }
+      rollback:
+        - dropTable: { tableName: cards }
+
+  # ---------------------------------------------------------------- games
+  # One play-through with a deck, for 2..8 seats. Seats are humans or CPUs (see game_players).
+  # Lifecycle: WAITING (lobby, people join via join_code) -> IN_PROGRESS (host starts, needs >= 2 seats) -> FINISHED.
+  # join_code is the shareable part; the join link is built in code as <frontend base url>/join/<join_code>
+  # (the full URL is not stored because the domain differs per environment).
+  - changeSet:
+      id: 005-games
+      author: cards
+      changes:
+        - createTable:
+            tableName: games
+            columns:
+              - column: { name: id, type: uuid, defaultValueComputed: gen_random_uuid(), constraints: { primaryKey: true, primaryKeyName: games_pkey, nullable: false } }
+              - column: { name: join_code, type: text, constraints: { nullable: false, unique: true, uniqueConstraintName: games_join_code_key } }
+              - column: { name: deck_id, type: uuid, constraints: { nullable: false } }
+              - column: { name: host_id, type: uuid, remarks: null = anonymous host }
+              - column: { name: max_players, type: smallint, defaultValueNumeric: 2, constraints: { nullable: false } }
+              - column: { name: turn_timeout_seconds, type: smallint, remarks: "null = no limit; on timeout the server auto-picks" }
+              - column: { name: status, type: smallint, defaultValueNumeric: 0, constraints: { nullable: false } }
+              - column: { name: rounds, type: int }
+              - column: { name: created_at, type: timestamp with time zone, defaultValueComputed: now(), constraints: { nullable: false } }
+              - column: { name: started_at, type: timestamp with time zone }
+              - column: { name: finished_at, type: timestamp with time zone }
+        - addForeignKeyConstraint: { constraintName: games_deck_id_fkey, baseTableName: games, baseColumnNames: deck_id, referencedTableName: decks, referencedColumnNames: id }
+        - addForeignKeyConstraint: { constraintName: games_host_id_fkey, baseTableName: games, baseColumnNames: host_id, referencedTableName: players, referencedColumnNames: id }
+        - sql: ALTER TABLE games ADD CONSTRAINT games_join_code_check CHECK (join_code ~ '^[A-Z0-9]{6,8}$')
+        - sql: ALTER TABLE games ADD CONSTRAINT games_max_players_check CHECK (max_players BETWEEN 2 AND 8)
+        - sql: ALTER TABLE games ADD CONSTRAINT games_turn_timeout_seconds_check CHECK (turn_timeout_seconds IS NULL OR turn_timeout_seconds > 0)
+        - sql: ALTER TABLE games ADD CONSTRAINT games_status_check CHECK (status IN (0, 1, 2, 3))
+        - createIndex: { indexName: games_deck_idx, tableName: games, columns: [ { column: { name: deck_id } } ] }
+        - sql: CREATE INDEX games_host_idx ON games (host_id, created_at DESC)
+        - createIndex: { indexName: games_status_idx, tableName: games, columns: [ { column: { name: status } } ] }
+      rollback:
+        - dropTable: { tableName: games }
+
+  # ---------------------------------------------------------------- game_players
+  # The seats of a game. A seat is either a human (player_id set) or a CPU (player_id null, difficulty set).
+  # placement: 1 = winner, 2 = last one eliminated, ...; players who tie at the end share a number. Null until decided.
+  # seat <= games.max_players and "at least 2 seats to start" are enforced in code.
+  - changeSet:
+      id: 006-game-players
+      author: cards
+      changes:
+        - createTable:
+            tableName: game_players
+            columns:
+              - column: { name: game_id, type: uuid, constraints: { nullable: false } }
+              - column: { name: seat, type: smallint, constraints: { nullable: false } }
+              - column: { name: kind, type: smallint, defaultValueNumeric: 0, constraints: { nullable: false } }
+              - column: { name: player_id, type: uuid }
+              - column: { name: difficulty, type: smallint }
+              - column: { name: placement, type: smallint }
+              - column: { name: joined_at, type: timestamp with time zone, defaultValueComputed: now(), constraints: { nullable: false } }
+        - addPrimaryKey: { constraintName: game_players_pkey, tableName: game_players, columnNames: "game_id, seat" }
+        - addForeignKeyConstraint:
+            constraintName: game_players_game_id_fkey
+            baseTableName: game_players
+            baseColumnNames: game_id
+            referencedTableName: games
+            referencedColumnNames: id
+            onDelete: CASCADE
+        - addForeignKeyConstraint: { constraintName: game_players_player_id_fkey, baseTableName: game_players, baseColumnNames: player_id, referencedTableName: players, referencedColumnNames: id }
+        - addUniqueConstraint: { constraintName: game_players_game_id_player_id_key, tableName: game_players, columnNames: "game_id, player_id" }
+        - sql: ALTER TABLE game_players ADD CONSTRAINT game_players_seat_check CHECK (seat BETWEEN 1 AND 8)
+        - sql: ALTER TABLE game_players ADD CONSTRAINT game_players_kind_check CHECK (kind IN (0, 1))
+        - sql: ALTER TABLE game_players ADD CONSTRAINT game_players_difficulty_check CHECK (difficulty IN (0, 1, 2))
+        - sql: ALTER TABLE game_players ADD CONSTRAINT game_players_placement_check CHECK (placement >= 1)
+        - sql: >-
+            ALTER TABLE game_players ADD CONSTRAINT game_players_check CHECK (
+            (kind = 0 AND player_id IS NOT NULL AND difficulty IS NULL)
+            OR (kind = 1 AND player_id IS NULL AND difficulty IS NOT NULL))
+        - createIndex: { indexName: game_players_player_idx, tableName: game_players, columns: [ { column: { name: player_id } }, { column: { name: placement } } ] }
+      rollback:
+        - dropTable: { tableName: game_players }
+
+  # ---------------------------------------------------------------- reference data
+  # Built-in public Wrestling deck (same rules as the Android app / frontend engine).
+  # Height is stored as TOTAL INCHES (feet*12 + inches) so it compares as a plain number.
+  - changeSet:
+      id: 007-seed-wrestling-deck
+      author: cards
+      changes:
+        - sql: >-
+            INSERT INTO decks (name, description, visibility, owner_id)
+            VALUES ('Wrestling', 'The original wrestling cards', 2, NULL)
+        - sql: >-
+            INSERT INTO deck_stats (deck_id, key, label, unit, value_type, comparison_strategy, display_order)
+            SELECT d.id, s.key, s.label, s.unit, s.value_type, s.comparison_strategy, s.display_order
+            FROM decks d,
+            (VALUES ('rank',   'Rank',   NULL,  0, 1, 1),
+                    ('fight',  'Fight',  NULL,  0, 0, 2),
+                    ('chest',  'Chest',  'in',  1, 0, 3),
+                    ('biceps', 'Biceps', 'in',  1, 0, 4),
+                    ('height', 'Height', 'in',  0, 0, 5),
+                    ('weight', 'Weight', 'lbs', 0, 0, 6))
+            AS s (key, label, unit, value_type, comparison_strategy, display_order)
+            WHERE d.name = 'Wrestling' AND d.owner_id IS NULL
+      rollback:
+        - sql: DELETE FROM decks WHERE name = 'Wrestling' AND owner_id IS NULL

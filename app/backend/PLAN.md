@@ -5,9 +5,9 @@ frontend real data, accounts and a leaderboard — then make games server-author
 
 ## Stack
 Java 21 · Spring Boot 3.5 · `JdbcTemplate` (plain SQL, easy to learn; JPA is an option later) ·
-Flyway migrations · Neon Postgres · JUnit 5. Host: Render / Railway / Fly.io (any container host).
+Liquibase changelogs (YAML) · Neon Postgres · JUnit 5. Host: Render / Railway / Fly.io (any container host).
 
-## Data model (V1__init.sql — schema + built-in Wrestling deck)
+## Data model (db/changelog/changes/001-init.yaml — schema + built-in Wrestling deck)
 Decks define their own stats; games are played with a deck.
 
 | table | purpose | notes |
