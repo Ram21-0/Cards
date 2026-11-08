@@ -5,6 +5,7 @@
 #   visibility          0 PRIVATE, 1 UNLISTED, 2 PUBLIC                   (Visibility)
 #   value_type          0 INT, 1 DECIMAL                                  (ValueType)
 #   comparison_strategy 0 HIGHER_WINS, 1 LOWER_WINS                       (ComparisonStrategy)
+#   display_format      0 PLAIN, 1 FEET_INCHES, 2 WITH_UNIT               (DisplayFormat) -> how the API renders displayValue
 #   kind (seat)         0 HUMAN, 1 CPU                                    (SeatKind)
 #   difficulty (CPU)    0 easy, 1 medium, 2 hard                          (DifficultyLevel)
 #   status              0 WAITING, 1 IN_PROGRESS, 2 FINISHED, 3 ABANDONED (GameStatus)
@@ -74,6 +75,7 @@ databaseChangeLog:
               - column: { name: value_type, type: smallint, defaultValueNumeric: 0, constraints: { nullable: false } }
               - column: { name: comparison_strategy, type: smallint, constraints: { nullable: false } }
               - column: { name: display_order, type: smallint, defaultValueNumeric: 0, remarks: order stats appear on the card, constraints: { nullable: false } }
+              - column: { name: display_format, type: smallint, defaultValueNumeric: 0, remarks: "how the API renders displayValue: 0 plain, 1 feet'inches, 2 value+unit", constraints: { nullable: false } }
         - addForeignKeyConstraint:
             constraintName: deck_stats_deck_id_fkey
             baseTableName: deck_stats
@@ -84,6 +86,7 @@ databaseChangeLog:
         - addUniqueConstraint: { constraintName: deck_stats_deck_id_key_key, tableName: deck_stats, columnNames: "deck_id, key" }
         - sql: ALTER TABLE deck_stats ADD CONSTRAINT deck_stats_value_type_check CHECK (value_type IN (0, 1))
         - sql: ALTER TABLE deck_stats ADD CONSTRAINT deck_stats_comparison_strategy_check CHECK (comparison_strategy IN (0, 1))
+        - sql: ALTER TABLE deck_stats ADD CONSTRAINT deck_stats_display_format_check CHECK (display_format IN (0, 1, 2))
       rollback:
         - dropTable: { tableName: deck_stats }
 
@@ -203,16 +206,16 @@ databaseChangeLog:
             INSERT INTO decks (name, description, visibility, owner_id)
             VALUES ('Wrestling', 'The original wrestling cards', 2, NULL)
         - sql: >-
-            INSERT INTO deck_stats (deck_id, key, label, unit, value_type, comparison_strategy, display_order)
-            SELECT d.id, s.key, s.label, s.unit, s.value_type, s.comparison_strategy, s.display_order
+            INSERT INTO deck_stats (deck_id, key, label, unit, value_type, comparison_strategy, display_order, display_format)
+            SELECT d.id, s.key, s.label, s.unit, s.value_type, s.comparison_strategy, s.display_order, s.display_format
             FROM decks d,
-            (VALUES ('rank',   'Rank',   NULL,  0, 1, 1),
-                    ('fight',  'Fight',  NULL,  0, 0, 2),
-                    ('chest',  'Chest',  'in',  1, 0, 3),
-                    ('biceps', 'Biceps', 'in',  1, 0, 4),
-                    ('height', 'Height', 'in',  0, 0, 5),
-                    ('weight', 'Weight', 'lbs', 0, 0, 6))
-            AS s (key, label, unit, value_type, comparison_strategy, display_order)
+            (VALUES ('rank',   'Rank',   NULL,  0, 1, 1, 0),   -- plain:        1
+                    ('fight',  'Fight',  NULL,  0, 0, 2, 0),   -- plain:        44
+                    ('chest',  'Chest',  'in',  1, 0, 3, 0),   -- plain:        38.5   (unit not shown, like the Android card)
+                    ('biceps', 'Biceps', 'in',  1, 0, 4, 0),   -- plain:        15
+                    ('height', 'Height', 'in',  0, 0, 5, 1),   -- feet'inches:  73 -> 6'1"
+                    ('weight', 'Weight', 'lbs', 0, 0, 6, 2))   -- value+unit:   240 -> 240lbs
+            AS s (key, label, unit, value_type, comparison_strategy, display_order, display_format)
             WHERE d.name = 'Wrestling' AND d.owner_id IS NULL
       rollback:
         - sql: DELETE FROM decks WHERE name = 'Wrestling' AND owner_id IS NULL

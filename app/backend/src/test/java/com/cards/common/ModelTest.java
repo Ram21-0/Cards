@@ -57,10 +57,33 @@ class ModelTest {
     }
 
     @Test
+    void displayFormats() {
+        assertEquals("6'1\"", DisplayFormat.FEET_INCHES.format(new BigDecimal("73"), "in"));
+        assertEquals("6'0\"", DisplayFormat.FEET_INCHES.format(new BigDecimal("72"), "in"));
+        assertEquals("5'11\"", DisplayFormat.FEET_INCHES.format(new BigDecimal("71"), "in"));
+        assertEquals("6'1.5\"", DisplayFormat.FEET_INCHES.format(new BigDecimal("73.5"), "in"));
+        assertEquals("38.5", DisplayFormat.PLAIN.format(new BigDecimal("38.50"), "in"));
+        assertEquals("15", DisplayFormat.PLAIN.format(new BigDecimal("15.0"), "in"));
+        assertEquals("0", DisplayFormat.PLAIN.format(new BigDecimal("0.00"), null));
+        assertEquals("240lbs", DisplayFormat.WITH_UNIT.format(new BigDecimal("240"), "lbs"));
+        assertEquals("240", DisplayFormat.WITH_UNIT.format(new BigDecimal("240"), null));
+    }
+
+    @Test
+    void deckDisplaysCardStatThroughItsDefinition() {
+        StatDefinition height = StatDefinition.builder().deckId(DECK_ID).key("height").label("Height").unit("in")
+                .valueType(ValueType.INT).comparisonStrategy(ComparisonStrategy.HIGHER_WINS)
+                .displayFormat(DisplayFormat.FEET_INCHES).displayOrder(1).build();
+        Deck deck = Deck.builder().id(DECK_ID).name("W").visibility(Visibility.PUBLIC).stats(List.of(height)).build();
+        assertEquals("6'1\"", deck.display(card("A", 1, 73), "height"));
+    }
+
+    @Test
     void dbCodesRoundTrip() {
         for (Visibility v : Visibility.values()) assertEquals(v, Visibility.get(v.dbVal()));
         for (ComparisonStrategy c : ComparisonStrategy.values()) assertEquals(c, ComparisonStrategy.get(c.dbVal()));
         for (GameStatus s : GameStatus.values()) assertEquals(s, GameStatus.get(s.dbVal()));
+        for (DisplayFormat f : DisplayFormat.values()) assertEquals(f, DisplayFormat.get(f.dbVal()));
         for (SeatKind k : SeatKind.values()) assertEquals(k, SeatKind.get(k.dbVal()));
         assertThrows(IllegalArgumentException.class, () -> Visibility.get(99));
     }

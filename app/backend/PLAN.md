@@ -46,7 +46,8 @@ Defaults — change any of them in one place (the rules engine):
 ## API (in build order)
 1. `GET /api/health` — `{"status":"ok"}` (+ db ping)
 2. `GET /api/decks` — public decks (+ the caller's own); `GET /api/decks/{id}` — deck with stat definitions;
-   `GET /api/decks/{id}/cards` — `{ id, name, img, stats: {…}, meta: {…} }`
+   `GET /api/decks/{id}/cards` — `{ id, name, img, stats: { height: { value: 73, displayValue: "6'1\"" }, … }, meta: {…} }`
+   (stats are in the deck's `display_order`; `displayValue` is formatted server-side from the stat's `display_format`, so clients just render it)
 3. `POST /api/players` `{username}` — create (409 if taken, max 8 chars, lowercased like the Android app)
 4. **Lobby:** `POST /api/games` `{deckId, maxPlayers, turnTimeoutSeconds?}` → `{id, joinCode, joinUrl}` (host takes seat 1);
    `GET /api/games/{joinCode}` — status, deck, seats; `POST /api/games/{joinCode}/join` — take the next free seat;

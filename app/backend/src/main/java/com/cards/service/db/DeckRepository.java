@@ -2,6 +2,7 @@ package com.cards.service.db;
 
 import com.cards.common.ComparisonStrategy;
 import com.cards.common.Deck;
+import com.cards.common.DisplayFormat;
 import com.cards.common.StatDefinition;
 import com.cards.common.ValueType;
 import com.cards.common.Visibility;
@@ -39,6 +40,7 @@ public class DeckRepository {
             .unit(rs.getString("unit"))
             .valueType(ValueType.get(rs.getInt("value_type")))
             .comparisonStrategy(ComparisonStrategy.get(rs.getInt("comparison_strategy")))
+            .displayFormat(DisplayFormat.get(rs.getInt("display_format")))
             .displayOrder(rs.getInt("display_order"))
             .build();
 

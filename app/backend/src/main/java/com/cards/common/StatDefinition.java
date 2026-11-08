@@ -18,7 +18,13 @@ public class StatDefinition {
     private final String unit;              // nullable
     private final ValueType valueType;
     private final ComparisonStrategy comparisonStrategy;
+    private final DisplayFormat displayFormat;
     private final int displayOrder;
+
+    /** The value as the card should show it, e.g. 73 -> 6'1" (see {@link DisplayFormat}). */
+    public String display(Stat stat) {
+        return displayFormat.format(stat.value(), unit);
+    }
 
     /** Outcome for the owner of {@code a} when facing {@code b}, using this stat's strategy. */
     public Outcome compare(Stat a, Stat b) {

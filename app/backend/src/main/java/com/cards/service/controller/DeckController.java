@@ -1,5 +1,6 @@
 package com.cards.service.controller;
 
+import com.cards.common.Deck;
 import com.cards.service.controller.dto.CardResponse;
 import com.cards.service.controller.dto.DeckResponse;
 import com.cards.service.service.DeckService;
@@ -31,6 +32,7 @@ public class DeckController {
 
     @GetMapping("/{id}/cards")
     public List<CardResponse> cards(@PathVariable UUID id) {
-        return decks.cardsOf(id).stream().map(CardResponse::from).toList();
+        Deck deck = decks.get(id);
+        return decks.cardsOf(deck).stream().map(c -> CardResponse.from(c, deck)).toList();
     }
 }

@@ -29,6 +29,11 @@ public class Deck {
                 .orElseThrow(() -> new IllegalArgumentException("Deck '" + name + "' has no stat '" + key + "'"));
     }
 
+    /** How card {@code card} shows its stat {@code key}, using this deck's display format. */
+    public String display(Card card, String key) {
+        return statDefinition(key).display(card.stat(key));
+    }
+
     /** Outcome for the owner of {@code a} when facing {@code b} on stat {@code key}. */
     public Outcome compare(Card a, Card b, String key) {
         return statDefinition(key).compare(a.stat(key), b.stat(key));

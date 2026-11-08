@@ -30,8 +30,8 @@ public class DeckService {
                 .orElseThrow(() -> new NotFoundException("Deck " + id + " not found"));
     }
 
-    public List<Card> cardsOf(UUID deckId) {
-        get(deckId);                                // same visibility rule
-        return cards.findByDeck(deckId);
+    /** Cards of a deck the caller is allowed to see (get the deck through {@link #get} first). */
+    public List<Card> cardsOf(Deck deck) {
+        return cards.findByDeck(deck.id());
     }
 }
