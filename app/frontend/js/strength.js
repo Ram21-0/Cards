@@ -69,6 +69,5 @@ export function bigCardNotices({ winnerSeat, mySeat, reveals, strong }) {
   return notices.sort((a, b) => a.position - b.position);
 }
 
-/** "You won Atlas Wolfe, the strongest card in the deck" / "You lost Iron Duke, the #3 strongest card in the deck". */
-export const bigCardText = (n) =>
-  `${n.kind === 'won' ? 'You won' : 'You lost'} ${n.name}, the ${n.position === 1 ? '' : `#${n.position} `}strongest card in the deck`;
+/** "You won Atlas Wolfe" / "You lost Iron Duke". */
+export const bigCardText = (n) => `${n.kind === 'won' ? 'You won' : 'You lost'} ${n.name}`;

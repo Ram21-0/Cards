@@ -86,6 +86,6 @@ test('a clash winner is told about big cards from every level of the clash, stro
 });
 
 test('bigCardText', () => {
-  assert.equal(bigCardText({ kind: 'won', name: 'Atlas Wolfe', position: 1 }), 'You won Atlas Wolfe, the strongest card in the deck');
-  assert.equal(bigCardText({ kind: 'lost', name: 'Iron Duke', position: 3 }), 'You lost Iron Duke, the #3 strongest card in the deck');
+  assert.equal(bigCardText({ kind: 'won', name: 'Atlas Wolfe', position: 1 }), 'You won Atlas Wolfe');
+  assert.equal(bigCardText({ kind: 'lost', name: 'Iron Duke', position: 3 }), 'You lost Iron Duke');
 });
