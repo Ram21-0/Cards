@@ -1,11 +1,12 @@
 import { Game, RESULT, DIFFICULTY } from './engine.js';
 import {
   wsUrl, createLiveClient, initialLive, applyMessage, seatName, seatRows, phaseInfo, secondsLeft,
-  eventText, callCard, clashInfo, overSummary, overFromGame, ordinal, pileList, pileTitle,
+  feedLines, callCard, clashInfo, overSummary, overFromGame, ordinal, pileList, pileTitle,
 } from './live.js';
+import { strongMap, bigCardNotices, bigCardText } from './strength.js';
 import { parseRoute, toHash, paths, backDecision, needsUnloadGuard, redirectFor, upAction } from './nav.js';
 import {
-  API_BASE, ApiError, fetchDecks, fetchDeck, createGame, getGame, joinGame, addCpu, removeSeat, leaveLobby, startLiveGame, fetchDeckStats, mapCard, callStat, chooseCard,
+  API_BASE, ApiError, fetchDecks, fetchDeck, createGame, getGame, joinGame, addCpu, removeSeat, leaveLobby, startLiveGame, mapCard, callStat, chooseCard,
   fetchNonce, googleSignIn, fetchMe, updateMe, signOut, deleteAccount, devLogin,
 } from './api.js';
 import { offlineDeck } from './offline.js';
@@ -40,7 +41,7 @@ const el = (tag, props = {}, ...kids) => {
   for (const kid of kids.flat()) n.append(kid?.nodeType ? kid : document.createTextNode(kid ?? ''));
   return n;
 };
-const show = (...nodes) => { screenId++; app.replaceChildren(...nodes); window.scrollTo(0, 0); };
+const show = (...nodes) => { screenId++; document.querySelector('.bigcard')?.remove(); app.replaceChildren(...nodes); window.scrollTo(0, 0); };
 const screen = (cls, ...kids) => el('section', { class: `screen ${cls}` }, ...kids);
 
 function toast(msg) {
@@ -514,7 +515,7 @@ function setGame(ctx, g) {
   }
   if (ctx.mySeat != null && !ctx.client && ['WAITING', 'IN_PROGRESS'].includes(g.status)) startSocket(ctx);
   if (inTable(g) && !ctx.deck) {
-    fetchDeckStats(g.deck.id).then((d) => { ctx.deck = d; ctx.paint(); }).catch(() => {});
+    loadFullDeck(g.deck.id).then((d) => { ctx.deck = d; ctx.strong = strongMap(d.cards, d.stats); ctx.paint(); }).catch(() => {});
   }
   ctx.paint();
 }
@@ -561,7 +562,10 @@ function onLiveMessage(ctx, msg) {
     if (ctx.pick != null && !(ctx.view.canChoose && ctx.view.ownHand.some((c) => c.id === ctx.pick))) ctx.pick = null;   // the choice is over
     return ctx.paint();
   }
-  if (msg.type === 'events') return ctx.paint();
+  if (msg.type === 'events') {
+    announceBigCards(bigCardsOf(ctx, ctx.rt.finishedRounds));
+    return ctx.paint();
+  }
   if (msg.type === 'gameOver') {
     ctx.mySeat = ctx.rt.mySeat;
     return setGame(ctx, ctx.rt.game);
@@ -785,8 +789,9 @@ function buildLastRound(ctx, lr) {
         el('figcaption', {}, seatName(g, Number(seat)), win ? ' 🏆' : ''));
     })) : '',
     el('p', { class: 'result' },
-      lr.winner != null ? `${seatName(g, lr.winner)} won the round and takes ${lr.cardsWon} card${lr.cardsWon === 1 ? '' : 's'}`
-        : lr.potCarried != null ? `No winner: the pot (${lr.potCarried}) carries over` : ''),
+      lr.winner != null ? `${seatName(g, lr.winner)} won the ${lr.clash > 0 ? 'clash' : 'round'} and takes ${lr.clash > 0 ? 'the pool: ' : ''}${lr.cardsWon} card${lr.cardsWon === 1 ? '' : 's'}`
+        : lr.potCarried != null ? `No winner: the pool (${lr.potCarried}) carries over` : ''),
+    ...bigCardNotices({ winnerSeat: lr.winner, mySeat: ctx.mySeat, reveals: lr.reveals, strong: ctx.strong }).map((n) => el('p', { class: `result big ${n.kind}` }, bigLine(n))),
     ...lr.eliminated.map((e) => el('p', { class: 'result out' }, `${seatName(g, e.seat)} is out (#${e.placement})`)));
 }
 
@@ -804,11 +809,29 @@ function pileSection(ctx) {
   return details;
 }
 
+/* ---------- big cards: winning or losing one of the strongest cards of the deck is a big moment ---------- */
+const bigLine = (n) => `${n.kind === 'won' ? '🏆' : '💔'} ${bigCardText(n)}`;
+
+/** Big-card notices for rounds that just finished in a live game (needs the deck loaded: no deck, no notice). */
+function bigCardsOf(ctx, rounds) {
+  return (rounds ?? []).flatMap((r) => bigCardNotices({ winnerSeat: r.winner, mySeat: ctx.mySeat, reveals: r.reveals, strong: ctx.strong }));
+}
+
+/** A banner at the top of the screen for a few seconds: green and a pop for a big win, red and a shake for a big loss. */
+function announceBigCards(notices) {
+  document.querySelector('.bigcard')?.remove();
+  if (!notices.length) return;
+  const lost = notices[0].kind === 'lost';
+  const box = el('div', { class: `bigcard ${lost ? 'lost' : 'won'}`, role: 'status' },
+    notices.slice(0, 4).map((n) => el('p', { class: `bigline ${n.kind}` }, bigLine(n))));
+  document.body.append(box);
+  setTimeout(() => box.classList.add('out'), 4300);
+  setTimeout(() => box.remove(), 4900);
+}
+
 /** The last few things that happened, newest first. */
 function feedList(ctx) {
-  const g = ctx.game;
-  const lines = ctx.rt.feed.filter((e) => e.type !== 'revealed' && e.type !== 'gameOver')
-    .map((e) => eventText(e, g, statLabelOf(ctx))).filter(Boolean).slice(-6).reverse();
+  const lines = feedLines(ctx.rt.feed, ctx.game, statLabelOf(ctx)).slice(-6).reverse();
   return lines.length ? el('ol', { class: 'feed', 'aria-label': 'Recent events' }, lines.map((t) => el('li', {}, t))) : '';
 }
 
@@ -850,8 +873,8 @@ function liveScreen(ctx) {
   return [
     el('div', { class: 'topbar' }, el('button', { class: 'btn small ghost', onclick: () => (isSeated() ? askLeave() : goUp(paths.decks())) }, '✕ Leave'), el('h2', {}, g.deck.name), connChip(ctx)),
     el('section', { class: `panel table-status${info.clash ? ' clash' : ''}`, role: 'status' },
-      clash.active ? el('div', { class: 'clash-banner' }, el('b', {}, `⚔ CLASH${clash.level > 1 ? ` ×${clash.level}` : ''}`), el('span', {}, clash.names.length ? `${clash.names.join(' vs ')}${v.potSize ? ` · pot ${v.potSize}` : ''}` : '')) : '',
-      v ? el('div', { class: 'status-meta' }, el('b', {}, `Round ${v.round}`), !clash.active && v.potSize > 0 ? el('span', { class: 'pill' }, `Pot · ${v.potSize}`) : '', el('span', { class: `countdown${clash.active ? ' big' : ''}` }, left == null ? '' : `${left}s`)) : '',
+      clash.active ? el('div', { class: 'clash-banner' }, el('b', {}, `⚔ CLASH${clash.level > 1 ? ` ×${clash.level}` : ''}`), el('span', {}, clash.names.length ? `${clash.names.join(' vs ')}${v.potSize ? ` · pool ${v.potSize}` : ''}` : '')) : '',
+      v ? el('div', { class: 'status-meta' }, el('b', {}, `Round ${v.round}`), !clash.active && v.potSize > 0 ? el('span', { class: 'pill' }, `Pool · ${v.potSize}`) : '', el('span', { class: `countdown${clash.active ? ' big' : ''}` }, left == null ? '' : `${left}s`)) : '',
       el('p', { class: 'status' }, info.text)),
     v && v.canChoose ? choosePanel(ctx) : '',
     v && v.canCall ? callPanel(ctx, clash.active) : '',
@@ -1065,7 +1088,7 @@ function hud() {
     el('div', { class: 'score' }, el('b', {}, game.playerCount), el('small', {}, 'You')),
     el('div', { class: 'share-wrap', 'aria-hidden': 'true' },
       el('div', { class: 'share' }, el('i', { style: `width:${(game.playerCount / total) * 100}%` })),
-      game.potCount ? el('span', { class: 'pot' }, `Pot · ${game.potCount}`) : el('span', {}, `Round ${game.round + 1}`)),
+      game.potCount ? el('span', { class: 'pot' }, `Pool · ${game.potCount}`) : el('span', {}, `Round ${game.round + 1}`)),
     el('div', { class: 'score cpu' }, el('b', {}, game.cpuCount), el('small', {}, 'CPU')));
 }
 
@@ -1114,10 +1137,16 @@ const BANNER = {
 function resolve(key) {
   const w1 = game.playerCard;
   const w2 = game.cpuCard;
+  const potBefore = [...game.pot];                      // cards waiting from earlier clashes: pot = [mine, CPU's, mine, CPU's, ...]
   const r = game.play(key);
   const s = game.stat(key);
+  deck.strong ??= strongMap(deck.cards, deck.stats);
+  const notices = bigCardNotices({
+    winnerSeat: r.result === RESULT.WIN ? 1 : r.result === RESULT.LOSS ? 2 : null, mySeat: 1, strong: deck.strong,
+    reveals: [...potBefore.map((card, i) => ({ seat: i % 2 === 0 ? 1 : 2, card })), { seat: 1, card: w1 }, { seat: 2, card: w2 }],
+  });
   const b = BANNER[r.result];
-  const note = r.result === RESULT.CLASH ? `Tied on ${s.label}. Both cards go to the pot (${game.potCount}).`
+  const note = r.result === RESULT.CLASH ? `Tied on ${s.label}. Both cards go to the pool (${game.potCount}).`
     : `${r.caller === 'player' ? 'You' : 'CPU'} called ${s.label}${s.higherWins ? '' : ' (lower wins)'}`;
 
   const versus = el('div', { class: 'versus', 'data-view': 'cpu' },
@@ -1131,11 +1160,13 @@ function resolve(key) {
     el('div', { class: `banner ${b.cls}`, role: 'status' },
       el('h2', {}, b.title),
       el('p', {}, note),
+      notices.map((n) => el('p', { class: `bigline ${n.kind}` }, bigLine(n))),
       el('div', { class: 'vs' }, el('span', {}, `You ${w1.stats[key].display}`), el('span', {}, '·'), el('span', {}, `CPU ${w2.stats[key].display}`))),
     el('div', { class: 'tabs' }, el('div', { class: 'segmented' }, tab('me', 'Your card'), tab('cpu', 'CPU card'))),
     versus,
     el('div', { class: 'dock' }, go));
   go.focus({ preventScroll: true });
+  announceBigCards(notices);
 }
 
 /* ---------- game over ---------- */

@@ -31,6 +31,7 @@ export const initialLive = () => ({
   current: null,       // the round being played, folded from events
   lastRound: null,     // the last finished round (what to show on the table)
   over: null,          // { placements, endedByRoundCap } once the game has ended
+  finishedRounds: [],  // rounds that ended in the last `events` message (a CPU-only stretch can finish several)
 });
 
 const FEED_MAX = 12;
@@ -60,6 +61,7 @@ export function applyMessage(state, msg, nowMs = Date.now()) {
       const folded = foldRounds({ current: state.current, lastRound: state.lastRound }, events);
       next.current = folded.current;
       next.lastRound = folded.lastRound;
+      next.finishedRounds = folded.finished;
       break;
     }
     case 'gameOver':
@@ -211,7 +213,8 @@ export function secondsLeft(deadline, nowMs, offsetMs = 0) {
 export function foldRounds({ current, lastRound }, events) {
   let cur = current;
   let last = lastRound;
-  const fresh = (round, caller) => ({ round, caller, stat: null, statSeat: null, statAuto: false, cards: null, clash: 0, tied: null,
+  const finished = [];
+  const fresh = (round, caller) => ({ round, caller, stat: null, statSeat: null, statAuto: false, cards: null, reveals: [], clash: 0, tied: null,
     winner: null, cardsWon: 0, potCarried: null, eliminated: [] });
   for (const ev of events ?? []) {
     switch (ev.type) {
@@ -228,17 +231,20 @@ export function foldRounds({ current, lastRound }, events) {
         break;
       case 'revealed':
         cur ??= fresh(null, null);
-        cur = { ...cur, cards: ev.cards };                         // in a clash this is the latest reveal
+        // `cards` is the latest reveal (what the panel shows); `reveals` keeps every card that was in play, clash levels included
+        cur = { ...cur, cards: ev.cards, reveals: [...cur.reveals, ...Object.entries(ev.cards).map(([seat, card]) => ({ seat: Number(seat), card }))] };
         break;
       case 'roundWon':
         cur ??= fresh(null, null);
         cur = { ...cur, winner: ev.seat, cardsWon: ev.cardsWon };
         last = cur;
+        finished.push(cur);
         break;
       case 'potCarried':
         cur ??= fresh(null, null);
         cur = { ...cur, potCarried: ev.potSize };
         last = cur;
+        finished.push(cur);
         break;
       case 'playerEliminated':
         cur ??= fresh(null, null);
@@ -248,11 +254,14 @@ export function foldRounds({ current, lastRound }, events) {
       default:                                                     // cardChosen, gameOver: nothing to fold
     }
   }
-  return { current: cur, lastRound: last };
+  return { current: cur, lastRound: last, finished };
 }
 
-/** One line per event for the feed. `statLabel(key)` turns a stat key into its label. */
-export function eventText(ev, game, statLabel = (k) => k) {
+/**
+ * One line per event for the feed. `statLabel(key)` turns a stat key into its label.
+ * `opts.clash`: this round went through a clash, so the winner takes the whole pool.
+ */
+export function eventText(ev, game, statLabel = (k) => k, opts = {}) {
   const name = (seat) => seatName(game, seat);
   const auto = ev.auto ? ' (time ran out)' : '';
   switch (ev.type) {
@@ -262,9 +271,9 @@ export function eventText(ev, game, statLabel = (k) => k) {
       ? `Nobody called in time: ${statLabel(ev.stat)} was picked at random`
       : `${name(ev.seat)} called ${statLabel(ev.stat)}${auto}`;
     case 'revealed': return 'Cards revealed';
-    case 'roundWon': return `${name(ev.seat)} won the round and takes ${ev.cardsWon} card${ev.cardsWon === 1 ? '' : 's'}`;
-    case 'clashStarted': return `CLASH${ev.level > 1 ? ` ×${ev.level}` : ''}: ${(ev.tiedSeats ?? []).map(name).join(' and ')} tied (pot ${ev.potSize})`;
-    case 'potCarried': return `Nobody could settle the tie: the pot (${ev.potSize}) carries over`;
+    case 'roundWon': return `${name(ev.seat)} won the ${opts.clash ? 'clash' : 'round'} and takes ${opts.clash ? 'the pool: ' : ''}${ev.cardsWon} card${ev.cardsWon === 1 ? '' : 's'}`;
+    case 'clashStarted': return `CLASH${ev.level > 1 ? ` ×${ev.level}` : ''}: ${(ev.tiedSeats ?? []).map(name).join(' and ')} tied (pool ${ev.potSize})`;
+    case 'potCarried': return `Nobody could settle the tie: the pool (${ev.potSize}) carries over`;
     case 'playerEliminated': return `${name(ev.seat)} is out (#${ev.placement})`;
     case 'gameOver': return ev.endedByRoundCap ? 'Round cap reached: game over' : 'Game over';
     default: return '';
@@ -320,3 +329,20 @@ export function pileList(view) {
 
 /** Title of that section: with CHOOSE still open nothing is in play yet, so it is the whole pile. */
 export const pileTitle = (view) => (view?.canChoose && !view?.committed ? 'Your pile, in order' : 'Your cards after this turn');
+
+/**
+ * The feed as lines of text, oldest first. A round that went through a clash is worded as winning the pool,
+ * so "X won the clash and takes the pool: 6 cards". Events that need no line (revealed, gameOver) are skipped.
+ */
+export function feedLines(events, game, statLabel = (k) => k) {
+  let clash = false;
+  const lines = [];
+  for (const ev of events ?? []) {
+    if (ev.type === 'roundStarted') clash = false;
+    if (ev.type === 'clashStarted') clash = true;
+    if (ev.type === 'revealed' || ev.type === 'gameOver') continue;
+    const text = eventText(ev, game, statLabel, { clash });
+    if (text) lines.push(text);
+  }
+  return lines;
+}

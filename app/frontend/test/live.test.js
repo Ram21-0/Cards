@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { wsUrl, backoffDelay, skewMs, initialLive, applyMessage, seatName, seatRows, phaseInfo, secondsLeft, createLiveClient, PING_MS,
-  foldRounds, eventText, callCard, clashInfo, ordinal, overFromGame, overSummary, pileList, pileTitle } from '../js/live.js';
+  foldRounds, eventText, feedLines, callCard, clashInfo, ordinal, overFromGame, overSummary, pileList, pileTitle } from '../js/live.js';
 
 const game = (over = {}) => ({
   id: 'g1', joinCode: 'K7Q2XM', status: 'WAITING', maxPlayers: 4, deck: { id: 'd', name: 'Wrestling' }, hostSeat: 1,
@@ -284,8 +284,8 @@ test('eventText wording for every event, including auto moves and clashes', () =
   assert.equal(eventText({ type: 'statCalled', seat: null, stat: 'rank', auto: true }, g, label), 'Nobody called in time: Rank was picked at random');
   assert.equal(eventText({ type: 'roundWon', seat: 2, cardsWon: 1 }, g), 'CPU (hard) won the round and takes 1 card');
   assert.equal(eventText({ type: 'roundWon', seat: 1, cardsWon: 5 }, g), 'ann won the round and takes 5 cards');
-  assert.equal(eventText({ type: 'clashStarted', tiedSeats: [1, 2], level: 2, potSize: 6 }, g), 'CLASH ×2: ann and CPU (hard) tied (pot 6)');
-  assert.equal(eventText({ type: 'potCarried', potSize: 4 }, g), 'Nobody could settle the tie: the pot (4) carries over');
+  assert.equal(eventText({ type: 'clashStarted', tiedSeats: [1, 2], level: 2, potSize: 6 }, g), 'CLASH ×2: ann and CPU (hard) tied (pool 6)');
+  assert.equal(eventText({ type: 'potCarried', potSize: 4 }, g), 'Nobody could settle the tie: the pool (4) carries over');
   assert.equal(eventText({ type: 'playerEliminated', seat: 2, placement: 2 }, g), 'CPU (hard) is out (#2)');
   assert.equal(eventText({ type: 'gameOver', endedByRoundCap: true }, g), 'Round cap reached: game over');
   assert.equal(eventText({ type: 'nonsense' }, g), '');
@@ -386,4 +386,65 @@ test('pileTitle: "after this turn" once a card is in play, "your pile" while you
   assert.equal(pileTitle({ canChoose: true, committed: null }), 'Your pile, in order');
   assert.equal(pileTitle({ canChoose: true, committed: { id: 1 } }), 'Your cards after this turn');
   assert.equal(pileTitle(null), 'Your cards after this turn');
+});
+
+test('winning a clash says how many cards were won from the pool; a normal round does not', () => {
+  const g = game();
+  assert.equal(eventText({ type: 'roundWon', seat: 1, cardsWon: 6 }, g, undefined, { clash: true }), 'ann won the clash and takes the pool: 6 cards');
+  assert.equal(eventText({ type: 'roundWon', seat: 2, cardsWon: 1 }, g, undefined, { clash: true }), 'CPU (hard) won the clash and takes the pool: 1 card');
+  assert.equal(eventText({ type: 'roundWon', seat: 1, cardsWon: 6 }, g), 'ann won the round and takes 6 cards');
+});
+
+test('feedLines: the clash wording applies only to the round that had a clash, and skips reveals', () => {
+  const g = game();
+  const events = [
+    { type: 'roundStarted', round: 1, caller: 1, seats: [1, 2] },
+    { type: 'statCalled', seat: 1, stat: 'rank', auto: false },
+    { type: 'revealed', cards: {} },
+    { type: 'roundWon', seat: 1, cardsWon: 2 },                                // a normal round
+    { type: 'roundStarted', round: 2, caller: 1, seats: [1, 2] },
+    { type: 'clashStarted', tiedSeats: [1, 2], level: 1, potSize: 2 },
+    { type: 'statCalled', seat: 2, stat: 'weight', auto: false },
+    { type: 'revealed', cards: {} },
+    { type: 'roundWon', seat: 2, cardsWon: 6 },                                // a clash round
+    { type: 'roundStarted', round: 3, caller: 2, seats: [1, 2] },
+    { type: 'roundWon', seat: 2, cardsWon: 2 },                                // normal again
+    { type: 'gameOver', endedByRoundCap: false },
+  ];
+  const lines = feedLines(events, g, (k) => k);
+  assert.ok(lines.includes('ann won the round and takes 2 cards'));
+  assert.ok(lines.includes('CPU (hard) won the clash and takes the pool: 6 cards'));
+  assert.ok(lines.includes('CPU (hard) won the round and takes 2 cards'));
+  assert.equal(lines.filter((l) => l.includes('the pool:')).length, 1);
+  assert.ok(!lines.includes('Cards revealed') && !lines.includes('Game over'));
+  assert.equal(lines[0], 'Round 1: ann calls');                                 // oldest first
+  // a feed that starts after the clash began (older events trimmed) falls back to the plain wording
+  assert.deepEqual(feedLines([{ type: 'roundWon', seat: 1, cardsWon: 4 }], g), ['ann won the round and takes 4 cards']);
+});
+
+test('foldRounds keeps every card that was in play (all clash levels) and reports every round a message finished', () => {
+  const evs = [
+    { type: 'roundStarted', round: 1, caller: 1, seats: [1, 2, 3] },
+    { type: 'revealed', cards: { 1: card(1, 'a'), 2: card(2, 'b'), 3: card(3, 'c') } },
+    { type: 'clashStarted', tiedSeats: [1, 2], level: 1, potSize: 3 },
+    { type: 'revealed', cards: { 1: card(4, 'd'), 2: card(5, 'e') } },
+    { type: 'roundWon', seat: 1, cardsWon: 5 },
+    { type: 'roundStarted', round: 2, caller: 1, seats: [1, 2] },
+    { type: 'revealed', cards: { 1: card(6, 'f'), 2: card(7, 'g') } },
+    { type: 'potCarried', potSize: 2 },
+  ];
+  const { lastRound, finished } = foldRounds({ current: null, lastRound: null }, evs);
+  assert.equal(finished.length, 2);
+  assert.equal(finished[0].winner, 1);
+  assert.deepEqual(finished[0].reveals.map((r) => [r.seat, r.card.id]), [[1, 1], [2, 2], [3, 3], [1, 4], [2, 5]]);   // both levels
+  assert.deepEqual(Object.keys(finished[0].cards), ['1', '2']);                                                      // the panel still shows the latest reveal
+  assert.equal(finished[1].potCarried, 2);
+  assert.equal(lastRound, finished[1]);
+});
+
+test('applyMessage exposes the rounds finished by the latest events message only', () => {
+  let s = applyMessage(initialLive(), { type: 'events', events: [{ type: 'roundStarted', round: 1, caller: 1, seats: [1, 2] }, { type: 'roundWon', seat: 1, cardsWon: 2 }] });
+  assert.equal(s.finishedRounds.length, 1);
+  s = applyMessage(s, { type: 'events', events: [{ type: 'cardChosen', seat: 2, auto: false }] });
+  assert.equal(s.finishedRounds.length, 0);
 });
