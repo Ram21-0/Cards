@@ -160,12 +160,12 @@ public final class GameEngine {
         settle(now, Integer.MAX_VALUE);
         requireRunning();
         if (phase != Phase.AWAIT_CHOOSE_CALLER && phase != Phase.AWAIT_CHOOSE_OTHERS && phase != Phase.CLASH_AWAIT_CHOOSE) {
-            throw new GameRuleException("Not waiting for a card choice");
+            throw new GameRuleException(GameRuleException.Kind.WRONG_PHASE, "Not waiting for a card choice");
         }
         Seat seat = seatOrThrow(seatNumber);
-        if (!pendingChoosers.contains(seatNumber)) throw new GameRuleException("Seat " + seatNumber + " cannot choose a card now");
+        if (!pendingChoosers.contains(seatNumber)) throw new GameRuleException(GameRuleException.Kind.NOT_YOUR_TURN, "Seat " + seatNumber + " cannot choose a card now");
         int index = indexOfCard(seat.hand, cardId);
-        if (index < 0) throw new GameRuleException("Card " + cardId + " is not in the hand of seat " + seatNumber);
+        if (index < 0) throw new GameRuleException(GameRuleException.Kind.BAD_INPUT, "Card " + cardId + " is not in the hand of seat " + seatNumber);
 
         commit(seat, index);
         pendingChoosers.remove(seatNumber);
@@ -187,13 +187,13 @@ public final class GameEngine {
         StatDefinition called = statOrThrow(statKey);
         seatOrThrow(seatNumber);
         if (phase == Phase.AWAIT_CALL) {
-            if (seatNumber != callerSeat) throw new GameRuleException("Seat " + seatNumber + " is not the caller");
+            if (seatNumber != callerSeat) throw new GameRuleException(GameRuleException.Kind.NOT_YOUR_TURN, "Seat " + seatNumber + " is not the caller");
             applyCall(seatNumber, called, false, now);
         } else if (phase == Phase.CLASH_AWAIT_CALL) {
-            if (!contenders.contains(seatNumber)) throw new GameRuleException("Seat " + seatNumber + " is not in the clash");
+            if (!contenders.contains(seatNumber)) throw new GameRuleException(GameRuleException.Kind.NOT_YOUR_TURN, "Seat " + seatNumber + " is not in the clash");
             applyClashStat(seatNumber, called, false, now);
         } else {
-            throw new GameRuleException("Not waiting for a stat");
+            throw new GameRuleException(GameRuleException.Kind.WRONG_PHASE, "Not waiting for a stat");
         }
         drive(now);
         return drain();
@@ -202,6 +202,38 @@ public final class GameEngine {
     /** Applies everything that is due at {@code now}: timeouts (random stat / top card) and CPU calls in a clash race. */
     public List<GameEvent> tick(Instant now) {
         if (!over()) settle(now, Integer.MAX_VALUE);
+        return drain();
+    }
+
+    /**
+     * The seat is not there (it is disconnected) and its turn is not worth waiting for: does what a timeout would have
+     * done for THIS seat only, now. Does nothing unless the seat may act in a phase that has a timeout (a clash race is
+     * left to its own 5 s timer, and the other seats are untouched).
+     */
+    public List<GameEvent> timeoutSeat(int seatNumber) {
+        Instant now = clock.instant();
+        if (over()) return drain();
+        settle(now, Integer.MAX_VALUE);
+        if (over() || !actingSeats().contains(seatNumber)) return drain();
+        Seat seat = seatOrThrow(seatNumber);
+        switch (phase) {
+            case AWAIT_CHOOSE_CALLER, AWAIT_CHOOSE_OTHERS, CLASH_AWAIT_CHOOSE -> {
+                commit(seat, 0);
+                pendingChoosers.remove(seatNumber);
+                out.add(new GameEvent.CardChosen(seatNumber, true));
+                afterChoosing(now);
+            }
+            case AWAIT_CALL -> {
+                StatDefinition random = stats.get(rnd.nextInt(stats.size()));
+                stat = random;
+                out.add(new GameEvent.StatCalled(callerSeat, random.key(), true));
+                enterChoose(Phase.AWAIT_CHOOSE_OTHERS, now);
+            }
+            default -> {
+                return drain();
+            }
+        }
+        drive(now);
         return drain();
     }
 
@@ -662,17 +694,17 @@ public final class GameEngine {
     }
 
     private void requireRunning() {
-        if (over()) throw new GameRuleException("The game is over");
+        if (over()) throw new GameRuleException(GameRuleException.Kind.GAME_OVER, "The game is over");
     }
 
     private Seat seatOrThrow(int number) {
-        if (number < 1 || number > seats.size()) throw new GameRuleException("No such seat: " + number);
+        if (number < 1 || number > seats.size()) throw new GameRuleException(GameRuleException.Kind.BAD_INPUT, "No such seat: " + number);
         return seats.get(number - 1);
     }
 
     private StatDefinition statOrThrow(String key) {
         for (StatDefinition s : stats) if (s.key().equals(key)) return s;
-        throw new GameRuleException("Unknown stat: " + key);
+        throw new GameRuleException(GameRuleException.Kind.BAD_INPUT, "Unknown stat: " + key);
     }
 
     private static int indexOfCard(Collection<Card> hand, int cardId) {

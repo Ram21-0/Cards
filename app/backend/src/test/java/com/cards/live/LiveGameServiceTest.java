@@ -42,7 +42,8 @@ class LiveGameServiceTest {
     private final GameHub hub = new GameHub(clock, 90);
     private final GameRegistry registry = new GameRegistry();
     private final LiveMessages messages = new LiveMessages(json(), clock, FRONTEND);
-    private final LiveGameService live = new LiveGameService(games, hub, registry, messages);
+    private final LivePlay play = new LivePlay(registry, hub, messages, new ManualGameScheduler(clock), mock(com.cards.service.db.GameRepository.class), games, clock, 15);
+    private final LiveGameService live = new LiveGameService(games, hub, registry, messages, play);
     private final Player ann = player("ann"), bob = player("bob");
 
     private FakeSocket connect(Player p) {
@@ -133,7 +134,7 @@ class LiveGameServiceTest {
 
         assertTrue(registry.find(CODE).isPresent());
         for (FakeSocket socket : List.of(forAnn, forBob)) {
-            assertEquals(List.of("started", "view"), socket.sent.stream().map(m -> {
+            assertEquals(List.of("started", "events", "view"), socket.sent.stream().map(m -> {
                 try { return parse(m).get("type").asText(); } catch (Exception e) { throw new IllegalStateException(e); }
             }).toList());
         }

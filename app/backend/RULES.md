@@ -93,3 +93,4 @@ Conservation of cards at every step (hands + pot + in-flight = deck size) · no 
 - **Card counts** (`handSize`, the view's `handSizes`) include a card already put in play this round: it is still the player's until the round is decided.
 - **Turn timeout** (when set) also limits CHOOSE inside a clash; with no limit a human may take as long as they like.
 - **A CPU delay longer than `clashCallSeconds`** (e.g. a 2 s window against a 1.5–4 s delay) simply loses to the timeout: the server draws the stat.
+- **Absent humans (live play):** a human who has no open connection while it is their turn is timed out after a grace period (default 15 s, counted from the later of the disconnect and the start of their turn), exactly as a turn timeout would: random stat, or the top card. It applies even when the game has no turn timeout, affects only that seat, and a clash race is left to its own timer (`GameEngine.timeoutSeat`).

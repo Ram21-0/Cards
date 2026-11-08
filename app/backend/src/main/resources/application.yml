@@ -30,6 +30,12 @@ app:
     ttl-days: 30
     cookie-name: session
     cookie-secure: false
+  live:
+    absence-grace-seconds: 15                 # a human with no open socket on their turn is timed out after this long (LIVE.md)
+    stale-seconds: 90                         # a socket that has been silent this long is closed (the server pings every 25 s)
+  rate-limit:
+    actions: 30                               # lobby/play requests per player ...
+    window-seconds: 10                        # ... per this many seconds
   dev-login:
     enabled: false                            # POST /api/dev/login exists only where this is true (local/application.yml)
 

@@ -41,7 +41,7 @@ public class SecurityConfig {
                         .requestMatchers(HttpMethod.OPTIONS, "/**").permitAll()
                         .requestMatchers("/api/me").authenticated()
                         .requestMatchers(HttpMethod.POST, "/api/games", "/api/games/*/join", "/api/games/*/cpu", "/api/games/*/leave",
-                                "/api/games/*/start").authenticated()                      // reading a game (join-link preview) stays public
+                                "/api/games/*/start", "/api/games/*/call", "/api/games/*/choose").authenticated()                      // reading a game (join-link preview) stays public
                         .requestMatchers(HttpMethod.DELETE, "/api/games/*/seats/*").authenticated()
                         .anyRequest().permitAll())
                 .addFilterBefore(new SessionAuthFilter(sessions, cookies), UsernamePasswordAuthenticationFilter.class);

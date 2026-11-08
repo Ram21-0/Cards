@@ -119,6 +119,21 @@ public class GameRepository {
         jdbc.update("update games set status = ?, started_at = ? where id = ?", GameStatus.IN_PROGRESS.dbVal(), Timestamp.from(now), gameId);
     }
 
+    /** IN_PROGRESS -> FINISHED: writes every seat's placement, the number of rounds played and when it ended (one transaction). */
+    @org.springframework.transaction.annotation.Transactional
+    public void finish(UUID gameId, java.util.Map<Integer, Integer> placementsBySeat, int rounds, Instant now) {
+        placementsBySeat.forEach((seat, placement) ->
+                jdbc.update("update game_players set placement = ? where game_id = ? and seat = ?", placement, gameId, seat));
+        jdbc.update("update games set status = ?, rounds = ?, finished_at = ? where id = ?",
+                GameStatus.FINISHED.dbVal(), rounds, Timestamp.from(now), gameId);
+    }
+
+    /** Server start: games that were running have lost their in-memory state, so they can never finish. Returns how many. */
+    public int abandonInProgress(Instant now) {
+        return jdbc.update("update games set status = ?, finished_at = ? where status = ?",
+                GameStatus.ABANDONED.dbVal(), Timestamp.from(now), GameStatus.IN_PROGRESS.dbVal());
+    }
+
     /**
      * Closes the gaps left by removed seats (1, 3, 4 -> 1, 2, 3) so seat numbers are 1..n, as the rules engine needs.
      * Seats are moved down one by one in ascending order, so a target seat is always free.

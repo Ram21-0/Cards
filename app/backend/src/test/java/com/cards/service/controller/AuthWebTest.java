@@ -427,6 +427,30 @@ class AuthWebTest {
     }
 
     @Test
+    void callAndChooseNeedSignInAndTheHeaderAndAnswerWithTheCallersView() throws Exception {
+        for (String url : new String[]{"/api/games/K7Q2XM/call", "/api/games/K7Q2XM/choose"}) {
+            mvc.perform(post(url).contentType(MediaType.APPLICATION_JSON).content("{}")).andExpect(status().isUnauthorized());
+            mvc.perform(post(url).cookie(GOOD).contentType(MediaType.APPLICATION_JSON).content("{}"))
+                    .andExpect(status().isForbidden()).andExpect(jsonPath("$.error").value("Missing X-Requested-With header"));
+        }
+        com.cards.live.ViewMessage view = new com.cards.live.ViewMessage("view", java.time.Instant.parse("2026-11-08T10:00:00Z"), 1,
+                "AWAIT_CALL", 1, 1, null, 0, 0, null, java.util.List.of(1, 2), java.util.Map.of(1, 3, 2, 3), java.util.List.of(), null,
+                false, true, java.util.Map.of());
+        when(live.call("K7Q2XM", ANN, "power")).thenReturn(view);
+        when(live.choose("K7Q2XM", ANN, 17)).thenReturn(view);
+
+        mvc.perform(post("/api/games/K7Q2XM/call").cookie(GOOD).header(HDR, "cards").contentType(MediaType.APPLICATION_JSON).content("{\"stat\":\"power\"}"))
+                .andExpect(status().isOk()).andExpect(jsonPath("$.type").value("view")).andExpect(jsonPath("$.canCall").value(true));
+        mvc.perform(post("/api/games/K7Q2XM/choose").cookie(GOOD).header(HDR, "cards").contentType(MediaType.APPLICATION_JSON).content("{\"cardId\":17}"))
+                .andExpect(status().isOk()).andExpect(jsonPath("$.seat").value(1));
+        mvc.perform(post("/api/games/K7Q2XM/choose").cookie(GOOD).header(HDR, "cards").contentType(MediaType.APPLICATION_JSON).content("{}"))
+                .andExpect(status().isBadRequest()).andExpect(jsonPath("$.error").value("cardId is required"));
+        // a Bearer client needs no header
+        mvc.perform(post("/api/games/K7Q2XM/call").header("Authorization", "Bearer good-token").contentType(MediaType.APPLICATION_JSON).content("{\"stat\":\"power\"}"))
+                .andExpect(status().isOk());
+    }
+
+    @Test
     void theHostAddsRemovesAndStartsThroughTheLiveService() throws Exception {
         when(live.addCpu("K7Q2XM", ANN, "hard")).thenReturn(details("K7Q2XM"));
         when(live.removeSeat("K7Q2XM", ANN, 2)).thenReturn(details("K7Q2XM"));

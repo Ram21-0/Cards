@@ -1,6 +1,7 @@
 package com.cards.live;
 
 import com.cards.common.SeatInfo;
+import com.cards.game.GameEvent;
 import com.cards.game.PlayerView;
 import com.cards.service.controller.dto.CardResponse;
 import com.cards.service.controller.dto.GameResponse;
@@ -50,12 +51,86 @@ public class LiveMessages {
 
     /** The personalised view of one seat. */
     public String view(LiveGame game, int seat) {
+        return write(viewMessage(game, seat));
+    }
+
+    /** Same, as an object (the REST call/choose answers return it). */
+    public ViewMessage viewMessage(LiveGame game, int seat) {
         PlayerView v = game.view(seat);
-        return write(new ViewMessage("view", clock.instant(), v.seat(), v.phase().name(), v.round(), v.callerSeat(), v.stat(),
+        return new ViewMessage("view", clock.instant(), v.seat(), v.phase().name(), v.round(), v.callerSeat(), v.stat(),
                 v.clashLevel(), v.potSize(), v.deadline(), v.contenders(), v.handSizes(),
                 v.ownHand().stream().map(c -> CardResponse.from(c, game.deck())).toList(),
                 v.committed() == null ? null : CardResponse.from(v.committed(), game.deck()),
-                v.canChoose(), v.canCall(), game.placements()));
+                v.canChoose(), v.canCall(), game.placements());
+    }
+
+    /** What just happened, for everyone in the game (identical for all: events never hold hidden cards). */
+    public String events(LiveGame game, List<GameEvent> events) {
+        return write(Map.of("type", "events", "serverTime", clock.instant(),
+                "events", events.stream().map(e -> event(e, game)).toList()));
+    }
+
+    /** The game is over and saved: the placements and the final game body. */
+    public String gameOver(GameDetails details, UUID playerId, Map<Integer, Integer> placements, boolean endedByRoundCap) {
+        Map<String, Object> message = game("gameOver", details, playerId);
+        message.put("placements", placements);
+        message.put("endedByRoundCap", endedByRoundCap);
+        return write(message);
+    }
+
+    private Map<String, Object> event(GameEvent e, LiveGame game) {
+        Map<String, Object> m = new LinkedHashMap<>();
+        switch (e) {
+            case GameEvent.RoundStarted r -> {
+                m.put("type", "roundStarted");
+                m.put("round", r.round());
+                m.put("caller", r.caller());
+                m.put("seats", r.seats());
+            }
+            case GameEvent.CardChosen c -> {
+                m.put("type", "cardChosen");
+                m.put("seat", c.seat());
+                m.put("auto", c.auto());
+            }
+            case GameEvent.StatCalled c -> {
+                m.put("type", "statCalled");
+                m.put("seat", c.seat());
+                m.put("stat", c.stat());
+                m.put("auto", c.auto());
+            }
+            case GameEvent.Revealed r -> {
+                m.put("type", "revealed");
+                Map<Integer, CardResponse> cards = new LinkedHashMap<>();
+                r.cards().forEach((seat, card) -> cards.put(seat, CardResponse.from(card, game.deck())));
+                m.put("cards", cards);
+            }
+            case GameEvent.RoundWon r -> {
+                m.put("type", "roundWon");
+                m.put("seat", r.seat());
+                m.put("cardsWon", r.cardsWon());
+            }
+            case GameEvent.ClashStarted c -> {
+                m.put("type", "clashStarted");
+                m.put("tiedSeats", c.tiedSeats());
+                m.put("level", c.level());
+                m.put("potSize", c.potSize());
+            }
+            case GameEvent.PotCarried p -> {
+                m.put("type", "potCarried");
+                m.put("potSize", p.potSize());
+            }
+            case GameEvent.PlayerEliminated p -> {
+                m.put("type", "playerEliminated");
+                m.put("seat", p.seat());
+                m.put("placement", p.placement());
+            }
+            case GameEvent.GameOver g -> {
+                m.put("type", "gameOver");
+                m.put("placements", g.placements());
+                m.put("endedByRoundCap", g.endedByRoundCap());
+            }
+        }
+        return m;
     }
 
     private Map<String, Object> game(String type, GameDetails details, UUID playerId) {

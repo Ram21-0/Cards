@@ -1,6 +1,10 @@
 package com.cards.live;
 
+import com.cards.common.BadRequestException;
+import com.cards.common.ConflictException;
+import com.cards.common.ForbiddenException;
 import com.cards.common.Player;
+import com.cards.game.GameRuleException;
 import com.cards.service.service.GameDetails;
 import com.cards.service.service.GameService;
 import com.cards.service.service.StartedGame;
@@ -22,14 +26,16 @@ public class LiveGameService {
     private final GameHub hub;
     private final GameRegistry registry;
     private final LiveMessages messages;
+    private final LivePlay play;
     /** One lock per game code so lobby pushes cannot overtake each other; each push reads the latest state. */
     private final Map<String, Object> pushLocks = new ConcurrentHashMap<>();
 
-    public LiveGameService(GameService games, GameHub hub, GameRegistry registry, LiveMessages messages) {
+    public LiveGameService(GameService games, GameHub hub, GameRegistry registry, LiveMessages messages, LivePlay play) {
         this.games = games;
         this.hub = hub;
         this.registry = registry;
         this.messages = messages;
+        this.play = play;
     }
 
     // ------------------------------------------------------------------------------------------ lobby actions
@@ -69,12 +75,46 @@ public class LiveGameService {
         LiveGame live = new LiveGame(joinCode, details.game().id(), started.engine(), details.deck(), details.seats());
         registry.put(live);
         synchronized (lockFor(joinCode)) {
-            for (Connection c : hub.connections(joinCode)) {
-                c.send(messages.started(details, c.player().id()));
-                sendView(live, c);
-            }
+            play.begin(live, details);
         }
         return details;
+    }
+
+    // ------------------------------------------------------------------------------------------ playing
+
+    /** The seat's owner calls a stat. Answers with their new view (everyone also gets it over the WebSocket). */
+    public ViewMessage call(String code, Player me, String stat) {
+        LiveGame live = runningGameOf(code, me);
+        try {
+            return play.call(live, live.seatOf(me.id()), stat);
+        } catch (GameRuleException e) {
+            throw refused(e);
+        }
+    }
+
+    public ViewMessage choose(String code, Player me, int cardId) {
+        LiveGame live = runningGameOf(code, me);
+        try {
+            return play.choose(live, live.seatOf(me.id()), cardId);
+        } catch (GameRuleException e) {
+            throw refused(e);
+        }
+    }
+
+    private LiveGame runningGameOf(String code, Player me) {
+        String normalized = code.trim().toUpperCase(java.util.Locale.ROOT);
+        games.get(normalized);                                              // 404 for an unknown game
+        LiveGame live = registry.find(normalized).orElseThrow(() -> new ConflictException("The game is not in progress"));
+        if (live.seatOf(me.id()) == null) throw new ForbiddenException("You are not in this game");
+        return live;
+    }
+
+    private static RuntimeException refused(GameRuleException e) {
+        return switch (e.kind()) {
+            case BAD_INPUT -> new BadRequestException(e.getMessage());
+            case NOT_YOUR_TURN -> new ForbiddenException(e.getMessage());
+            case WRONG_PHASE, GAME_OVER -> new ConflictException(e.getMessage());
+        };
     }
 
     // ------------------------------------------------------------------------------------------ connections
@@ -84,12 +124,16 @@ public class LiveGameService {
         synchronized (lockFor(c.code())) {
             GameDetails details = games.get(c.code());
             c.send(messages.lobby(details, c.player().id()));
-            registry.find(c.code()).ifPresent(live -> sendView(live, c));
+            registry.find(c.code()).ifPresent(live -> live.withLock(() -> {
+                sendView(live, c);
+                return null;
+            }));
         }
+        play.connected(c.code(), c.player().id());
     }
 
     public void onDisconnect(Connection c) {
-        // stage 2: an absent human on their turn times out after a grace period
+        play.disconnected(c.code(), c.player().id());
     }
 
     // ------------------------------------------------------------------------------------------ pushes

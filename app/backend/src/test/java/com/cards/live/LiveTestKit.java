@@ -93,7 +93,6 @@ final class LiveTestKit {
     /** An engine with known hands (human seats unless a spec says CPU). The first caller is seat 1. */
     static GameEngine engine(TestClock clock, GameSettings settings, List<SeatSpec> specs, List<List<Card>> hands) {
         GameEngine e = GameEngine.withHands(STATS, specs, settings, hands, 1, 0, new SplittableRandom(1), clock);
-        e.pollEvents();
         return e;
     }
 
@@ -136,8 +135,15 @@ final class LiveTestKit {
             return new Connection(session, code, player, now);
         }
 
+        /** The messages whose top-level {@code type} is this one (not an event of that name inside an {@code events} message). */
         List<String> ofType(String type) {
-            return sent.stream().filter(s -> s.contains("\"type\":\"" + type + "\"")).toList();
+            return sent.stream().filter(s -> {
+                try {
+                    return type.equals(json().readTree(s).path("type").asText());
+                } catch (Exception e) {
+                    throw new IllegalStateException(e);
+                }
+            }).toList();
         }
 
         String last() {

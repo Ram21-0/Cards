@@ -3,6 +3,9 @@ package com.cards.service.controller;
 import com.cards.common.Player;
 import com.cards.live.LiveGameService;
 import com.cards.live.RateLimiter;
+import com.cards.live.ViewMessage;
+import com.cards.service.controller.dto.CallRequest;
+import com.cards.service.controller.dto.ChooseRequest;
 import com.cards.service.controller.dto.AddCpuRequest;
 import com.cards.service.controller.dto.CreateGameRequest;
 import com.cards.service.controller.dto.GameResponse;
@@ -84,5 +87,20 @@ public class GameController {
     @GetMapping("/{joinCode}")
     public GameResponse get(@PathVariable String joinCode) {
         return GameResponse.from(games.get(joinCode), frontendBaseUrl);
+    }
+
+    /** The seat's owner calls a stat (caller in a normal round, anyone still in a clash). 400 unknown stat, 403 not your turn, 409 wrong phase. */
+    @PostMapping("/{joinCode}/call")
+    public ViewMessage call(@AuthenticationPrincipal Player me, @PathVariable String joinCode, @RequestBody CallRequest request) {
+        rateLimiter.check(me.id());
+        return live.call(joinCode, me, request.stat());
+    }
+
+    /** CHOOSE: commits one card from the hand for this round. */
+    @PostMapping("/{joinCode}/choose")
+    public ViewMessage choose(@AuthenticationPrincipal Player me, @PathVariable String joinCode, @RequestBody ChooseRequest request) {
+        rateLimiter.check(me.id());
+        if (request.cardId() == null) throw new com.cards.common.BadRequestException("cardId is required");
+        return live.choose(joinCode, me, request.cardId());
     }
 }

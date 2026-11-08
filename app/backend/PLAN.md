@@ -155,7 +155,7 @@ The authoritative specification is **[RULES.md](RULES.md)** — change it there 
 - [x] **3 Players** — Google sign-in, sessions, username (the temporary anonymous `POST /api/players` is gone) — see *Authentication* above
 - [x] **4 Rules engine (pure Java, N players)** — `com.cards.game.GameEngine` per [RULES.md](RULES.md): rounds, recursive clash with the 5 s race, CHOOSE, elimination/placements, round cap, configurable CPU strategies; tested with the RULES.md §10 checklist and 3000 seeded random games (conservation checked at every step)
 - [x] **5 Lobby + games** — create, read, join, add/remove CPU, leave, start (builds the `GameEngine` from the seats) and the live lobby over WebSocket; contract in [LIVE.md](LIVE.md)
-- [ ] **6 Live play** (contract: [LIVE.md](LIVE.md)) — WebSocket events, turn timeout, reconnect (rebuild a player's view from server state), hidden-information check
+- [x] **6 Live play** (contract: [LIVE.md](LIVE.md)) — `call`/`choose`, WebSocket `lobby`/`started`/`view`/`events`/`gameOver`, turn and clash timers, absent-player grace, reconnect (the view is rebuilt from server state), hidden-information tests, result saved on game over. **Games run in memory** (`GameRegistry`): a deployment must be a **single instance**, and games that were IN_PROGRESS at a restart are marked ABANDONED at startup (no changeset 004 was needed)
 - [ ] **7 Leaderboard**
 - [ ] **8 Frontend: lobby + multiplayer table** — share link, seats list, "add CPU", up to 8 players' card counts; the card component stays as is
 
