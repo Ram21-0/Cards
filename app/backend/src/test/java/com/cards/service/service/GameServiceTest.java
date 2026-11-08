@@ -1,6 +1,15 @@
 package com.cards.service.service;
 
+import com.cards.TestClock;
 import com.cards.common.BadRequestException;
+import com.cards.common.Card;
+import com.cards.common.ComparisonStrategy;
+import com.cards.common.DifficultyLevel;
+import com.cards.common.DisplayFormat;
+import com.cards.common.ForbiddenException;
+import com.cards.common.Stat;
+import com.cards.common.StatDefinition;
+import com.cards.common.ValueType;
 import com.cards.common.ConflictException;
 import com.cards.common.Deck;
 import com.cards.common.Game;
@@ -10,12 +19,17 @@ import com.cards.common.Player;
 import com.cards.common.SeatInfo;
 import com.cards.common.SeatKind;
 import com.cards.common.Visibility;
+import com.cards.game.GameEngine;
+import com.cards.game.GameEngineFactory;
 import com.cards.game.GameSettings;
+import com.cards.game.SeatSpec;
+import com.cards.service.db.CardRepository;
 import com.cards.service.db.DeckRepository;
 import com.cards.service.db.GameRepository;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
 
+import java.math.BigDecimal;
 import java.time.Instant;
 import java.util.List;
 import java.util.Optional;
@@ -23,6 +37,7 @@ import java.util.UUID;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.anyString;
@@ -44,7 +59,11 @@ class GameServiceTest {
     private final GameRepository games = mock(GameRepository.class);
     private final DeckService decks = mock(DeckService.class);
     private final DeckRepository deckRepository = mock(DeckRepository.class);
-    private final GameService service = new GameService(games, decks, deckRepository, new GameSettings(300, 2, 8, 30));
+    private final CardRepository cardRepository = mock(CardRepository.class);
+    private final GameEngineFactory engines = mock(GameEngineFactory.class);
+    private final TestClock clock = TestClock.atNow();
+    private final GameService service = new GameService(games, decks, deckRepository, new GameSettings(300, 2, 8, 30),
+            cardRepository, engines, clock);
 
     private static Deck deck(int cardCount) {
         return Deck.builder().id(DECK_ID).name("Wrestling").visibility(Visibility.PUBLIC).cardCount(cardCount).stats(List.of()).build();
@@ -131,6 +150,173 @@ class GameServiceTest {
         when(decks.get(DECK_ID)).thenReturn(deck(54));
         when(games.insertIfCodeFree(anyString(), any(), any(), anyInt(), any())).thenReturn(Optional.empty());
         assertThrows(IllegalStateException.class, () -> service.create(DECK_ID, 4, ANN, GameOptions.NONE));
+    }
+
+    // ------------------------------------------------------------ lobby actions (host / leave / start)
+
+    private static SeatInfo humanSeat(int n, Player p) {
+        return new SeatInfo(n, SeatKind.HUMAN, p.username(), null, p.id(), null);
+    }
+
+    private static SeatInfo cpuSeat(int n, DifficultyLevel level) {
+        return new SeatInfo(n, SeatKind.CPU, null, level, null, null);
+    }
+
+    /** A WAITING game hosted by ANN, locked for update as the service reads it. */
+    private Game lobby(int maxPlayers, GameStatus status, List<SeatInfo> seats) {
+        Game g = Game.builder().id(UUID.randomUUID()).joinCode("K7Q2XM").deckId(DECK_ID).hostId(ANN.id()).maxPlayers(maxPlayers)
+                .maxRounds(300).chooseThreshold(2).clashCallSeconds(8).turnTimeoutSeconds(30).status(status).build();
+        when(games.findByJoinCodeForUpdate("K7Q2XM")).thenReturn(Optional.of(g));
+        when(games.findByJoinCode("K7Q2XM")).thenReturn(Optional.of(g));
+        when(deckRepository.findById(DECK_ID)).thenReturn(Optional.of(deck(54)));
+        when(games.findSeats(g.id())).thenReturn(seats);
+        return g;
+    }
+
+    @Test
+    void theHostAddsACpuToTheLowestFreeSeat() {
+        Game g = lobby(4, GameStatus.WAITING, List.of(humanSeat(1, ANN), humanSeat(3, BOB)));
+        service.addCpu("k7q2xm", ANN, "HARD");
+        verify(games).addCpuSeat(g.id(), 2, DifficultyLevel.hard);
+    }
+
+    @Test
+    void onlyTheHostMayAddACpu() {
+        lobby(4, GameStatus.WAITING, List.of(humanSeat(1, ANN), humanSeat(2, BOB)));
+        assertThrows(ForbiddenException.class, () -> service.addCpu("K7Q2XM", BOB, "easy"));
+        verify(games, never()).addCpuSeat(any(), anyInt(), any());
+    }
+
+    @Test
+    void aCpuCannotBeAddedToAFullOrStartedGameOrWithABadDifficulty() {
+        lobby(2, GameStatus.WAITING, List.of(humanSeat(1, ANN), humanSeat(2, BOB)));
+        assertEquals("Game is full", assertThrows(ConflictException.class, () -> service.addCpu("K7Q2XM", ANN, "easy")).getMessage());
+
+        lobby(4, GameStatus.IN_PROGRESS, List.of(humanSeat(1, ANN)));
+        assertEquals("Game has already started", assertThrows(ConflictException.class, () -> service.addCpu("K7Q2XM", ANN, "easy")).getMessage());
+
+        lobby(4, GameStatus.WAITING, List.of(humanSeat(1, ANN)));
+        for (String bad : new String[]{null, "", "impossible", "5"}) {
+            assertEquals("difficulty must be easy, medium or hard", assertThrows(BadRequestException.class, () -> service.addCpu("K7Q2XM", ANN, bad)).getMessage());
+        }
+        verify(games, never()).addCpuSeat(any(), anyInt(), any());
+    }
+
+    @Test
+    void theHostRemovesACpuSeatButNotAHuman() {
+        Game g = lobby(4, GameStatus.WAITING, List.of(humanSeat(1, ANN), humanSeat(2, BOB), cpuSeat(3, DifficultyLevel.easy)));
+        service.removeSeat("K7Q2XM", ANN, 3);
+        verify(games).deleteSeat(g.id(), 3);
+        assertEquals("Only CPU seats can be removed", assertThrows(BadRequestException.class, () -> service.removeSeat("K7Q2XM", ANN, 2)).getMessage());
+        assertThrows(NotFoundException.class, () -> service.removeSeat("K7Q2XM", ANN, 4));
+        assertThrows(ForbiddenException.class, () -> service.removeSeat("K7Q2XM", BOB, 3));
+        verify(games).deleteSeat(any(), anyInt());                              // only the first removal happened
+    }
+
+    @Test
+    void aSeatCannotBeRemovedOnceTheGameStarted() {
+        lobby(4, GameStatus.IN_PROGRESS, List.of(humanSeat(1, ANN), cpuSeat(2, DifficultyLevel.easy)));
+        assertThrows(ConflictException.class, () -> service.removeSeat("K7Q2XM", ANN, 2));
+    }
+
+    @Test
+    void aPlayerLeavesAndTheHostStaysTheHost() {
+        Game g = lobby(4, GameStatus.WAITING, List.of(humanSeat(1, ANN), humanSeat(2, BOB)));
+        service.leave("K7Q2XM", BOB);
+        verify(games).deleteSeat(g.id(), 2);
+        verify(games, never()).setHost(any(), any());
+        verify(games, never()).setStatus(any(), any());
+    }
+
+    @Test
+    void whenTheHostLeavesTheNextHumanBecomesHost() {
+        Game g = lobby(4, GameStatus.WAITING, List.of(humanSeat(1, ANN), cpuSeat(2, DifficultyLevel.easy), humanSeat(3, BOB)));
+        service.leave("K7Q2XM", ANN);
+        verify(games).deleteSeat(g.id(), 1);
+        verify(games).setHost(g.id(), BOB.id());
+        verify(games, never()).setStatus(any(), any());
+    }
+
+    @Test
+    void whenTheLastHumanLeavesTheGameIsAbandoned() {
+        Game g = lobby(4, GameStatus.WAITING, List.of(humanSeat(1, ANN), cpuSeat(2, DifficultyLevel.hard)));
+        service.leave("K7Q2XM", ANN);
+        verify(games).deleteSeat(g.id(), 1);
+        verify(games).setStatus(g.id(), GameStatus.ABANDONED);
+    }
+
+    @Test
+    void youCannotLeaveAGameYouAreNotInOrOneThatStarted() {
+        lobby(4, GameStatus.WAITING, List.of(humanSeat(1, ANN)));
+        assertEquals("You are not in this game", assertThrows(ConflictException.class, () -> service.leave("K7Q2XM", BOB)).getMessage());
+        lobby(4, GameStatus.IN_PROGRESS, List.of(humanSeat(1, ANN), humanSeat(2, BOB)));
+        assertEquals("Game has already started", assertThrows(ConflictException.class, () -> service.leave("K7Q2XM", BOB)).getMessage());
+        verify(games, never()).deleteSeat(any(), anyInt());
+    }
+
+    // ---- start
+
+    private static Card plainCard(int id, boolean withPower) {
+        return Card.builder().id(id).deckId(DECK_ID).name("C" + id).metadata(java.util.Map.of())
+                .stats(withPower ? List.of(new Stat("power", BigDecimal.valueOf(id))) : List.of()).build();
+    }
+
+    private static Deck deckWithPower() {
+        StatDefinition power = StatDefinition.builder().deckId(DECK_ID).key("power").label("Power").valueType(ValueType.INT)
+                .comparisonStrategy(ComparisonStrategy.HIGHER_WINS).displayFormat(DisplayFormat.PLAIN).displayOrder(1).build();
+        return Deck.builder().id(DECK_ID).name("Wrestling").visibility(Visibility.PUBLIC).cardCount(6).stats(List.of(power)).build();
+    }
+
+    @Test
+    void startingNeedsTheHostTwoSeatsAndAWaitingGame() {
+        lobby(4, GameStatus.WAITING, List.of(humanSeat(1, ANN), humanSeat(2, BOB)));
+        assertThrows(ForbiddenException.class, () -> service.start("K7Q2XM", BOB));
+
+        lobby(4, GameStatus.WAITING, List.of(humanSeat(1, ANN)));
+        assertEquals("At least 2 players are needed to start", assertThrows(ConflictException.class, () -> service.start("K7Q2XM", ANN)).getMessage());
+
+        lobby(4, GameStatus.IN_PROGRESS, List.of(humanSeat(1, ANN), humanSeat(2, BOB)));
+        assertEquals("Game has already started", assertThrows(ConflictException.class, () -> service.start("K7Q2XM", ANN)).getMessage());
+        verify(games, never()).markStarted(any(), any());
+        verifyNoInteractions(engines);
+    }
+
+    @Test
+    void aDeckWithTooFewOrIncompleteCardsCannotBeStarted() {
+        Game g = lobby(4, GameStatus.WAITING, List.of(humanSeat(1, ANN), humanSeat(2, BOB), cpuSeat(3, DifficultyLevel.easy)));
+        when(deckRepository.findById(DECK_ID)).thenReturn(Optional.of(deckWithPower()));
+        when(cardRepository.findByDeck(DECK_ID)).thenReturn(List.of(plainCard(1, true), plainCard(2, true)));
+        assertEquals("This deck has fewer cards than seats", assertThrows(ConflictException.class, () -> service.start("K7Q2XM", ANN)).getMessage());
+
+        when(cardRepository.findByDeck(DECK_ID)).thenReturn(List.of(plainCard(1, true), plainCard(2, true), plainCard(3, false)));
+        assertTrue(assertThrows(ConflictException.class, () -> service.start("K7Q2XM", ANN)).getMessage().contains("missing stats"));
+        verify(games, never()).renumberSeats(g.id());
+        verify(games, never()).markStarted(any(), any());
+    }
+
+    @Test
+    void startingCreatesTheEngineFromTheSeatsAndTheGamesSettings() {
+        Game g = lobby(4, GameStatus.WAITING, List.of(humanSeat(1, ANN), cpuSeat(3, DifficultyLevel.hard), humanSeat(4, BOB)));
+        when(deckRepository.findById(DECK_ID)).thenReturn(Optional.of(deckWithPower()));
+        List<Card> cards = List.of(plainCard(1, true), plainCard(2, true), plainCard(3, true), plainCard(4, true));
+        when(cardRepository.findByDeck(DECK_ID)).thenReturn(cards);
+        GameEngine engine = mock(GameEngine.class);
+        when(engines.create(any(), any(), any(), any())).thenReturn(engine);
+        // after renumbering the seats are 1, 2, 3
+        when(games.findSeats(g.id())).thenReturn(List.of(humanSeat(1, ANN), humanSeat(3, BOB)))                 // before: with a gap
+                .thenReturn(List.of(humanSeat(1, ANN), cpuSeat(2, DifficultyLevel.hard), humanSeat(3, BOB)));    // after renumbering
+
+        StartedGame started = service.start("K7Q2XM", ANN);
+
+        assertEquals(engine, started.engine());
+        ArgumentCaptor<List<SeatSpec>> specs = ArgumentCaptor.forClass(List.class);
+        ArgumentCaptor<GameSettings> settings = ArgumentCaptor.forClass(GameSettings.class);
+        verify(games).renumberSeats(g.id());
+        verify(engines).create(eq(cards), any(), specs.capture(), settings.capture());
+        assertEquals(List.of(SeatSpec.human(), SeatSpec.cpu(DifficultyLevel.hard), SeatSpec.human()), specs.getValue());
+        assertEquals(new GameSettings(300, 2, 8, 30), settings.getValue(), "the settings stored with the game");
+        verify(games).markStarted(g.id(), clock.instant());
+        assertEquals(3, started.details().seats().size());
     }
 
     // ------------------------------------------------------------ the rule settings (RULES.md §1)

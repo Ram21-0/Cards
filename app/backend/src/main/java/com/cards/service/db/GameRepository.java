@@ -49,7 +49,9 @@ public class GameRepository {
                 rs.getInt("seat"),
                 SeatKind.get(rs.getInt("kind")),
                 rs.getString("username"),
-                difficulty == null ? null : DifficultyLevel.get(difficulty));
+                difficulty == null ? null : DifficultyLevel.get(difficulty),
+                rs.getObject("player_id", UUID.class),
+                rs.getObject("placement", Integer.class));
     };
 
     /**
@@ -89,9 +91,46 @@ public class GameRepository {
     /** Seats in order, with the username of human players. */
     public List<SeatInfo> findSeats(UUID gameId) {
         return jdbc.query("""
-                select gp.seat, gp.kind, gp.difficulty, p.username
+                select gp.seat, gp.kind, gp.difficulty, gp.player_id, gp.placement, p.username
                 from game_players gp left join players p on p.id = gp.player_id
                 where gp.game_id = ? order by gp.seat""", SEAT, gameId);
+    }
+
+    /** Adds a CPU to a seat. */
+    public void addCpuSeat(UUID gameId, int seat, DifficultyLevel difficulty) {
+        jdbc.update("insert into game_players (game_id, seat, kind, difficulty) values (?, ?, ?, ?)",
+                gameId, seat, SeatKind.CPU.dbVal(), difficulty.dbVal());
+    }
+
+    public void deleteSeat(UUID gameId, int seat) {
+        jdbc.update("delete from game_players where game_id = ? and seat = ?", gameId, seat);
+    }
+
+    public void setHost(UUID gameId, UUID hostId) {
+        jdbc.update("update games set host_id = ? where id = ?", hostId, gameId);
+    }
+
+    public void setStatus(UUID gameId, GameStatus status) {
+        jdbc.update("update games set status = ? where id = ?", status.dbVal(), gameId);
+    }
+
+    /** WAITING -> IN_PROGRESS. */
+    public void markStarted(UUID gameId, Instant now) {
+        jdbc.update("update games set status = ?, started_at = ? where id = ?", GameStatus.IN_PROGRESS.dbVal(), Timestamp.from(now), gameId);
+    }
+
+    /**
+     * Closes the gaps left by removed seats (1, 3, 4 -> 1, 2, 3) so seat numbers are 1..n, as the rules engine needs.
+     * Seats are moved down one by one in ascending order, so a target seat is always free.
+     */
+    public void renumberSeats(UUID gameId) {
+        int next = 1;
+        for (SeatInfo seat : findSeats(gameId)) {
+            if (seat.seat() != next) {
+                jdbc.update("update game_players set seat = ? where game_id = ? and seat = ?", next, gameId, seat.seat());
+            }
+            next++;
+        }
     }
 
     private static Instant instant(ResultSet rs, String column) throws SQLException {

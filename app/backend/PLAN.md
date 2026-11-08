@@ -154,8 +154,8 @@ The authoritative specification is **[RULES.md](RULES.md)** — change it there 
 - [x] **2 Frontend uses it** — frontend fetches decks/cards (keep `data/cards.js` as offline fallback) and reads stat definitions instead of the hardcoded `STATS`
 - [x] **3 Players** — Google sign-in, sessions, username (the temporary anonymous `POST /api/players` is gone) — see *Authentication* above
 - [x] **4 Rules engine (pure Java, N players)** — `com.cards.game.GameEngine` per [RULES.md](RULES.md): rounds, recursive clash with the 5 s race, CHOOSE, elimination/placements, round cap, configurable CPU strategies; tested with the RULES.md §10 checklist and 3000 seeded random games (conservation checked at every step)
-- [ ] **5 Lobby + games** — create (sign-in), read, join (sign-in) are built; add CPU / start (create the `GameEngine` from the seats) still to do
-- [ ] **6 Live play** — WebSocket events, turn timeout, reconnect (rebuild a player's view from server state), hidden-information check
+- [x] **5 Lobby + games** — create, read, join, add/remove CPU, leave, start (builds the `GameEngine` from the seats) and the live lobby over WebSocket; contract in [LIVE.md](LIVE.md)
+- [ ] **6 Live play** (contract: [LIVE.md](LIVE.md)) — WebSocket events, turn timeout, reconnect (rebuild a player's view from server state), hidden-information check
 - [ ] **7 Leaderboard**
 - [ ] **8 Frontend: lobby + multiplayer table** — share link, seats list, "add CPU", up to 8 players' card counts; the card component stays as is
 

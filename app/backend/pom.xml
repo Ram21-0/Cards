@@ -32,6 +32,11 @@
       <groupId>org.springframework.boot</groupId>
       <artifactId>spring-boot-starter-security</artifactId>
     </dependency>
+    <!-- live play: a raw WebSocket (JSON text messages), not STOMP, so the plain-JS frontend can use `new WebSocket` -->
+    <dependency>
+      <groupId>org.springframework.boot</groupId>
+      <artifactId>spring-boot-starter-websocket</artifactId>
+    </dependency>
     <!-- verifies Google ID tokens (signature, audience, issuer, expiry) -->
     <dependency>
       <groupId>com.google.api-client</groupId>

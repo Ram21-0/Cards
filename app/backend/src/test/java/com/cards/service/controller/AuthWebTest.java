@@ -13,6 +13,8 @@ import com.cards.config.ClockConfig;
 import com.cards.config.SecurityConfig;
 import com.cards.config.SessionCookies;
 import com.cards.service.service.AuthService;
+import com.cards.live.LiveGameService;
+import com.cards.live.RateLimiter;
 import com.cards.service.service.GameDetails;
 import com.cards.service.service.GameOptions;
 import com.cards.service.service.GameService;
@@ -62,6 +64,8 @@ class AuthWebTest {
     @MockitoBean AuthService auth;
     @MockitoBean SessionService sessions;
     @MockitoBean GameService games;
+    @MockitoBean LiveGameService live;
+    @MockitoBean RateLimiter rateLimiter;
 
     @BeforeEach
     void knownSessions() {
@@ -275,9 +279,9 @@ class AuthWebTest {
     private static final UUID DECK_ID = UUID.randomUUID();
 
     private static GameDetails details(String code) {
-        Game g = Game.builder().id(UUID.randomUUID()).joinCode(code).deckId(DECK_ID).maxPlayers(4).maxRounds(500).chooseThreshold(3).clashCallSeconds(5).status(GameStatus.WAITING).build();
+        Game g = Game.builder().id(UUID.randomUUID()).joinCode(code).deckId(DECK_ID).hostId(ANN.id()).maxPlayers(4).maxRounds(500).chooseThreshold(3).clashCallSeconds(5).status(GameStatus.WAITING).build();
         Deck d = Deck.builder().id(DECK_ID).name("Wrestling").visibility(Visibility.PUBLIC).stats(List.of()).build();
-        return new GameDetails(g, d, List.of(new SeatInfo(1, SeatKind.HUMAN, "ann", null)));
+        return new GameDetails(g, d, List.of(new SeatInfo(1, SeatKind.HUMAN, "ann", null, ANN.id(), null)));
     }
 
     private static final String CREATE_BODY = "{\"deckId\":\"" + DECK_ID + "\",\"maxPlayers\":4}";
@@ -368,7 +372,7 @@ class AuthWebTest {
     void joiningWithoutSigningInIs401() throws Exception {
         mvc.perform(post("/api/games/K7Q2XM/join")).andExpect(status().isUnauthorized())
                 .andExpect(jsonPath("$.error").value("Sign in required"));
-        verify(games, never()).join(any(), any());
+        verify(live, never()).join(any(), any());
     }
 
     @Test
@@ -379,7 +383,7 @@ class AuthWebTest {
 
     @Test
     void joiningReturnsTheSameBodyAsReadingTheGame() throws Exception {
-        when(games.join("K7Q2XM", ANN)).thenReturn(details("K7Q2XM"));
+        when(live.join("K7Q2XM", ANN)).thenReturn(details("K7Q2XM"));
         mvc.perform(post("/api/games/K7Q2XM/join").cookie(GOOD).header("X-Requested-With", "cards"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.joinCode").value("K7Q2XM"))
@@ -390,15 +394,84 @@ class AuthWebTest {
 
     @Test
     void fullStartedAndUnknownGamesAreReportedAsErrors() throws Exception {
-        when(games.join("FULL11", ANN)).thenThrow(new com.cards.common.ConflictException("Game is full"));
-        when(games.join("NOPE12", ANN)).thenThrow(new com.cards.common.NotFoundException("Game NOPE12 not found"));
-        when(games.join("NONAME", ANN)).thenThrow(new com.cards.common.BadRequestException("Choose a username first"));
+        when(live.join("FULL11", ANN)).thenThrow(new com.cards.common.ConflictException("Game is full"));
+        when(live.join("NOPE12", ANN)).thenThrow(new com.cards.common.NotFoundException("Game NOPE12 not found"));
+        when(live.join("NONAME", ANN)).thenThrow(new com.cards.common.BadRequestException("Choose a username first"));
         mvc.perform(post("/api/games/FULL11/join").cookie(GOOD).header("X-Requested-With", "cards"))
                 .andExpect(status().isConflict()).andExpect(jsonPath("$.error").value("Game is full"));
         mvc.perform(post("/api/games/NOPE12/join").cookie(GOOD).header("X-Requested-With", "cards"))
                 .andExpect(status().isNotFound());
         mvc.perform(post("/api/games/NONAME/join").cookie(GOOD).header("X-Requested-With", "cards"))
                 .andExpect(status().isBadRequest()).andExpect(jsonPath("$.error").value("Choose a username first"));
+    }
+
+    // ------------------------------------------------------------ lobby actions: sign-in, the header rule, host-only answers
+
+    private static final String HDR = "X-Requested-With";
+
+    @Test
+    void theLobbyActionsNeedSignInAndTheHeaderForCookies() throws Exception {
+        String[] posts = {"/api/games/K7Q2XM/cpu", "/api/games/K7Q2XM/leave", "/api/games/K7Q2XM/start"};
+        for (String url : posts) {
+            mvc.perform(post(url).contentType(MediaType.APPLICATION_JSON).content("{\"difficulty\":\"easy\"}"))
+                    .andExpect(status().isUnauthorized()).andExpect(jsonPath("$.error").value("Sign in required"));
+            mvc.perform(post(url).cookie(GOOD).contentType(MediaType.APPLICATION_JSON).content("{\"difficulty\":\"easy\"}"))
+                    .andExpect(status().isForbidden()).andExpect(jsonPath("$.error").value("Missing X-Requested-With header"));
+        }
+        mvc.perform(delete("/api/games/K7Q2XM/seats/2")).andExpect(status().isUnauthorized());
+        mvc.perform(delete("/api/games/K7Q2XM/seats/2").cookie(GOOD)).andExpect(status().isForbidden());
+        verify(live, never()).addCpu(any(), any(), any());
+        verify(live, never()).leave(any(), any());
+        verify(live, never()).start(any(), any());
+        verify(live, never()).removeSeat(any(), any(), org.mockito.ArgumentMatchers.anyInt());
+    }
+
+    @Test
+    void theHostAddsRemovesAndStartsThroughTheLiveService() throws Exception {
+        when(live.addCpu("K7Q2XM", ANN, "hard")).thenReturn(details("K7Q2XM"));
+        when(live.removeSeat("K7Q2XM", ANN, 2)).thenReturn(details("K7Q2XM"));
+        when(live.start("K7Q2XM", ANN)).thenReturn(details("K7Q2XM"));
+        when(live.leave("K7Q2XM", ANN)).thenReturn(details("K7Q2XM"));
+
+        mvc.perform(post("/api/games/K7Q2XM/cpu").cookie(GOOD).header(HDR, "cards").contentType(MediaType.APPLICATION_JSON).content("{\"difficulty\":\"hard\"}"))
+                .andExpect(status().isOk()).andExpect(jsonPath("$.joinCode").value("K7Q2XM")).andExpect(jsonPath("$.hostSeat").value(1));
+        mvc.perform(delete("/api/games/K7Q2XM/seats/2").cookie(GOOD).header(HDR, "cards")).andExpect(status().isOk());
+        mvc.perform(post("/api/games/K7Q2XM/start").cookie(GOOD).header(HDR, "cards")).andExpect(status().isOk());
+        mvc.perform(post("/api/games/K7Q2XM/leave").cookie(GOOD).header(HDR, "cards")).andExpect(status().isOk());
+        verify(live).addCpu("K7Q2XM", ANN, "hard");
+        verify(live).removeSeat("K7Q2XM", ANN, 2);
+        verify(live).start("K7Q2XM", ANN);
+        verify(live).leave("K7Q2XM", ANN);
+    }
+
+    @Test
+    void bearerClientsCanUseTheLobbyActionsWithoutTheHeader() throws Exception {
+        when(live.start("K7Q2XM", ANN)).thenReturn(details("K7Q2XM"));
+        mvc.perform(post("/api/games/K7Q2XM/start").header("Authorization", "Bearer good-token")).andExpect(status().isOk());
+    }
+
+    @Test
+    void theErrorsOfTheLobbyActionsKeepTheirStatusCodes() throws Exception {
+        when(live.start("K7Q2XM", ANN)).thenThrow(new com.cards.common.ForbiddenException("Only the host can do that"));
+        when(live.addCpu("FULL11", ANN, "easy")).thenThrow(new com.cards.common.ConflictException("Game is full"));
+        when(live.addCpu("K7Q2XM", ANN, "genius")).thenThrow(new com.cards.common.BadRequestException("difficulty must be easy, medium or hard"));
+        when(live.removeSeat("K7Q2XM", ANN, 9)).thenThrow(new com.cards.common.NotFoundException("Seat 9 is empty"));
+
+        mvc.perform(post("/api/games/K7Q2XM/start").cookie(GOOD).header(HDR, "cards"))
+                .andExpect(status().isForbidden()).andExpect(jsonPath("$.error").value("Only the host can do that"));
+        mvc.perform(post("/api/games/FULL11/cpu").cookie(GOOD).header(HDR, "cards").contentType(MediaType.APPLICATION_JSON).content("{\"difficulty\":\"easy\"}"))
+                .andExpect(status().isConflict()).andExpect(jsonPath("$.error").value("Game is full"));
+        mvc.perform(post("/api/games/K7Q2XM/cpu").cookie(GOOD).header(HDR, "cards").contentType(MediaType.APPLICATION_JSON).content("{\"difficulty\":\"genius\"}"))
+                .andExpect(status().isBadRequest()).andExpect(jsonPath("$.error").value("difficulty must be easy, medium or hard"));
+        mvc.perform(delete("/api/games/K7Q2XM/seats/9").cookie(GOOD).header(HDR, "cards")).andExpect(status().isNotFound());
+    }
+
+    @Test
+    void anOverActiveClientGets429() throws Exception {
+        org.mockito.Mockito.doThrow(new com.cards.common.TooManyRequestsException("Too many requests, slow down")).when(rateLimiter).check(ANN.id());
+        mvc.perform(post("/api/games/K7Q2XM/start").cookie(GOOD).header(HDR, "cards"))
+                .andExpect(status().isTooManyRequests()).andExpect(jsonPath("$.error").value("Too many requests, slow down"));
+        verify(live, never()).start(any(), any());
     }
 
     @Test

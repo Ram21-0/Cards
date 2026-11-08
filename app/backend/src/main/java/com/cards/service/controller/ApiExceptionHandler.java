@@ -2,8 +2,10 @@ package com.cards.service.controller;
 
 import com.cards.common.BadRequestException;
 import com.cards.common.ConflictException;
+import com.cards.common.ForbiddenException;
 import com.cards.common.NotFoundException;
 import com.cards.common.ServiceUnavailableException;
+import com.cards.common.TooManyRequestsException;
 import com.cards.common.UnauthorizedException;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
@@ -30,6 +32,16 @@ public class ApiExceptionHandler {
     @ExceptionHandler(ConflictException.class)
     public ResponseEntity<Map<String, String>> conflict(ConflictException e) {
         return error(HttpStatus.CONFLICT, e.getMessage());
+    }
+
+    @ExceptionHandler(ForbiddenException.class)
+    public ResponseEntity<Map<String, String>> forbidden(ForbiddenException e) {
+        return error(HttpStatus.FORBIDDEN, e.getMessage());
+    }
+
+    @ExceptionHandler(TooManyRequestsException.class)
+    public ResponseEntity<Map<String, String>> tooManyRequests(TooManyRequestsException e) {
+        return error(HttpStatus.TOO_MANY_REQUESTS, e.getMessage());
     }
 
     @ExceptionHandler(UnauthorizedException.class)

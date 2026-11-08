@@ -109,13 +109,13 @@ public final class GameEngine {
     }
 
     /** A game from known hands (top card first) — for tests and for resuming a stored game. {@code roundsPlayed} rounds count towards the cap. */
-    static GameEngine withHands(List<StatDefinition> stats, List<SeatSpec> seatSpecs, GameSettings settings,
+    public static GameEngine withHands(List<StatDefinition> stats, List<SeatSpec> seatSpecs, GameSettings settings,
                                 List<List<Card>> hands, int firstCaller, int roundsPlayed,
                                 RandomGenerator rnd, Clock clock) {
         return withHands(stats, seatSpecs, settings, CpuProfiles.defaults(), hands, firstCaller, roundsPlayed, rnd, clock);
     }
 
-    static GameEngine withHands(List<StatDefinition> stats, List<SeatSpec> seatSpecs, GameSettings settings,
+    public static GameEngine withHands(List<StatDefinition> stats, List<SeatSpec> seatSpecs, GameSettings settings,
                                 CpuProfiles cpuProfiles, List<List<Card>> hands, int firstCaller, int roundsPlayed,
                                 RandomGenerator rnd, Clock clock) {
         return new GameEngine(stats, seatSpecs, settings, cpuProfiles, hands, firstCaller, roundsPlayed, rnd, clock);
