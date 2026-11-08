@@ -36,7 +36,7 @@ Troubleshooting
 - Slow first request → free-tier compute auto-suspends after ~5 min idle; the pool timeout is 30 s to allow for wake-up.
 - Leaked the password? Neon console → Roles → reset password.
 - In production set `DATABASE_URL` as an environment variable on the host instead of using `.env.prod`.
-- In IntelliJ the app reads `.env.local` only if the run configuration's working directory is `app/backend`; otherwise add `DATABASE_URL` under Environment variables (use `APP_ENV=prod` to switch files).
+- `.env.local` (or `.env.<APP_ENV>`) is found whatever folder the IDE starts the app from — it is looked up in the working directory, in `app/backend`, and next to the compiled classes (`config/DotEnvPostProcessor`). Real environment variables always win over the file; use `APP_ENV=prod` to switch files.
 
 ## Lombok
 Added (`@Getter`, `@Builder`, `@Slf4j`, `@RequiredArgsConstructor`, …). Two things to know:

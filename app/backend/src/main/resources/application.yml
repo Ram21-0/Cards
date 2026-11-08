@@ -4,10 +4,9 @@ spring:
   application:
     name: cards-backend
   config:
-    # Later imports override earlier ones. Real environment variables override all of them.
-    import:
-      - optional:classpath:/${APP_ENV:local}/application.yml
-      - optional:file:.env.${APP_ENV:local}[.properties]
+    # Per-environment, non-secret settings (APP_ENV, default "local"). Secrets come from .env.<APP_ENV> or real
+    # environment variables — see config/DotEnvPostProcessor.
+    import: optional:classpath:/${APP_ENV:local}/application.yml
   liquibase:
     change-log: classpath:db/changelog/db.changelog-master.yaml
 
