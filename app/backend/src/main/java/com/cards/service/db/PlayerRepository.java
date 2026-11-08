@@ -25,12 +25,6 @@ public class PlayerRepository {
             .createdAt(rs.getTimestamp("created_at").toInstant())
             .build();
 
-    /** Inserts the player; empty when the username is already taken (no exception, safe inside a transaction). */
-    public Optional<Player> insertIfAbsent(String username) {
-        return jdbc.query("insert into players (username) values (?) on conflict (username) do nothing returning *",
-                PLAYER, username).stream().findFirst();
-    }
-
     public Optional<Player> findById(UUID id) {
         return jdbc.query("select * from players where id = ?", PLAYER, id).stream().findFirst();
     }

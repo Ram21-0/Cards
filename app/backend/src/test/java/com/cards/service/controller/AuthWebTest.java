@@ -1,13 +1,20 @@
 package com.cards.service.controller;
 
+import com.cards.common.Deck;
+import com.cards.common.Game;
+import com.cards.common.GameStatus;
 import com.cards.common.Player;
+import com.cards.common.SeatInfo;
+import com.cards.common.SeatKind;
+import com.cards.common.Visibility;
 import com.cards.common.ServiceUnavailableException;
 import com.cards.common.UnauthorizedException;
 import com.cards.config.ClockConfig;
 import com.cards.config.SecurityConfig;
 import com.cards.config.SessionCookies;
 import com.cards.service.service.AuthService;
-import com.cards.service.service.PlayerService;
+import com.cards.service.service.GameDetails;
+import com.cards.service.service.GameService;
 import com.cards.service.service.SessionService;
 import jakarta.servlet.http.Cookie;
 import org.junit.jupiter.api.BeforeEach;
@@ -21,10 +28,12 @@ import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.MvcResult;
 
 import java.time.Instant;
+import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
 
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
@@ -39,7 +48,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
 /** HTTP-level tests of the security rules (no database, no Google). */
-@WebMvcTest(controllers = {AuthController.class, MeController.class, PlayerController.class})
+@WebMvcTest(controllers = {AuthController.class, MeController.class, GameController.class})
 @Import({SecurityConfig.class, SessionCookies.class, ClockConfig.class})
 class AuthWebTest {
 
@@ -51,7 +60,7 @@ class AuthWebTest {
     @Autowired MockMvc mvc;
     @MockitoBean AuthService auth;
     @MockitoBean SessionService sessions;
-    @MockitoBean PlayerService playerService;
+    @MockitoBean GameService games;
 
     @BeforeEach
     void knownSessions() {
@@ -260,12 +269,107 @@ class AuthWebTest {
 
     // ------------------------------------------------------------ stage 1 stays additive
 
+    // ------------------------------------------------------------ stage 2: games need a signed-in player
+
+    private static final UUID DECK_ID = UUID.randomUUID();
+
+    private static GameDetails details(String code) {
+        Game g = Game.builder().id(UUID.randomUUID()).joinCode(code).deckId(DECK_ID).maxPlayers(4).status(GameStatus.WAITING).build();
+        Deck d = Deck.builder().id(DECK_ID).name("Wrestling").visibility(Visibility.PUBLIC).stats(List.of()).build();
+        return new GameDetails(g, d, List.of(new SeatInfo(1, SeatKind.HUMAN, "ann", null)));
+    }
+
+    private static final String CREATE_BODY = "{\"deckId\":\"" + DECK_ID + "\",\"maxPlayers\":4}";
+
     @Test
-    void theAnonymousPlayerEndpointStillWorksWithoutASession() throws Exception {
-        when(playerService.create("ann")).thenReturn(ANN);
-        mvc.perform(post("/api/players").contentType(MediaType.APPLICATION_JSON).content("{\"username\":\"ann\"}"))
+    void creatingAGameWithoutSigningInIs401() throws Exception {
+        mvc.perform(post("/api/games").contentType(MediaType.APPLICATION_JSON).content(CREATE_BODY))
+                .andExpect(status().isUnauthorized())
+                .andExpect(jsonPath("$.error").value("Sign in required"));
+        verify(games, never()).create(any(), any(), any());
+    }
+
+    @Test
+    void creatingAGameWithAnExpiredSessionIs401() throws Exception {
+        mvc.perform(post("/api/games").cookie(new Cookie("session", "expired-or-unknown")).header("X-Requested-With", "cards")
+                        .contentType(MediaType.APPLICATION_JSON).content(CREATE_BODY))
+                .andExpect(status().isUnauthorized());
+    }
+
+    @Test
+    void creatingAGameWithACookieNeedsTheHeader() throws Exception {
+        mvc.perform(post("/api/games").cookie(GOOD).contentType(MediaType.APPLICATION_JSON).content(CREATE_BODY))
+                .andExpect(status().isForbidden())
+                .andExpect(jsonPath("$.error").value("Missing X-Requested-With header"));
+        verify(games, never()).create(any(), any(), any());
+    }
+
+    @Test
+    void theHostIsTheSessionsPlayerAndAClientSuppliedHostIdIsIgnored() throws Exception {
+        when(games.create(DECK_ID, 4, ANN)).thenReturn(details("K7Q2XM"));
+        String body = "{\"deckId\":\"" + DECK_ID + "\",\"maxPlayers\":4,\"hostId\":\"" + UUID.randomUUID() + "\"}";   // impersonation attempt
+        mvc.perform(post("/api/games").cookie(GOOD).header("X-Requested-With", "cards").contentType(MediaType.APPLICATION_JSON).content(body))
                 .andExpect(status().isCreated())
-                .andExpect(jsonPath("$.username").value("ann"));
+                .andExpect(jsonPath("$.joinCode").value("K7Q2XM"))
+                .andExpect(jsonPath("$.joinUrl").value("http://localhost:8081/?join=K7Q2XM"))
+                .andExpect(jsonPath("$.seats[0].username").value("ann"));
+        verify(games).create(DECK_ID, 4, ANN);
+    }
+
+    @Test
+    void aBearerClientCanCreateAGameWithoutTheHeader() throws Exception {
+        when(games.create(DECK_ID, 4, ANN)).thenReturn(details("K7Q2XM"));
+        mvc.perform(post("/api/games").header("Authorization", "Bearer good-token").contentType(MediaType.APPLICATION_JSON).content(CREATE_BODY))
+                .andExpect(status().isCreated());
+    }
+
+    @Test
+    void joiningWithoutSigningInIs401() throws Exception {
+        mvc.perform(post("/api/games/K7Q2XM/join")).andExpect(status().isUnauthorized())
+                .andExpect(jsonPath("$.error").value("Sign in required"));
+        verify(games, never()).join(any(), any());
+    }
+
+    @Test
+    void joiningWithACookieNeedsTheHeader() throws Exception {
+        mvc.perform(post("/api/games/K7Q2XM/join").cookie(GOOD)).andExpect(status().isForbidden());
+        verify(games, never()).join(any(), any());
+    }
+
+    @Test
+    void joiningReturnsTheSameBodyAsReadingTheGame() throws Exception {
+        when(games.join("K7Q2XM", ANN)).thenReturn(details("K7Q2XM"));
+        mvc.perform(post("/api/games/K7Q2XM/join").cookie(GOOD).header("X-Requested-With", "cards"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.joinCode").value("K7Q2XM"))
+                .andExpect(jsonPath("$.status").value("WAITING"))
+                .andExpect(jsonPath("$.deck.name").value("Wrestling"))
+                .andExpect(jsonPath("$.seats[0].kind").value("HUMAN"));
+    }
+
+    @Test
+    void fullStartedAndUnknownGamesAreReportedAsErrors() throws Exception {
+        when(games.join("FULL11", ANN)).thenThrow(new com.cards.common.ConflictException("Game is full"));
+        when(games.join("NOPE12", ANN)).thenThrow(new com.cards.common.NotFoundException("Game NOPE12 not found"));
+        when(games.join("NONAME", ANN)).thenThrow(new com.cards.common.BadRequestException("Choose a username first"));
+        mvc.perform(post("/api/games/FULL11/join").cookie(GOOD).header("X-Requested-With", "cards"))
+                .andExpect(status().isConflict()).andExpect(jsonPath("$.error").value("Game is full"));
+        mvc.perform(post("/api/games/NOPE12/join").cookie(GOOD).header("X-Requested-With", "cards"))
+                .andExpect(status().isNotFound());
+        mvc.perform(post("/api/games/NONAME/join").cookie(GOOD).header("X-Requested-With", "cards"))
+                .andExpect(status().isBadRequest()).andExpect(jsonPath("$.error").value("Choose a username first"));
+    }
+
+    @Test
+    void readingAGameStaysPublic() throws Exception {
+        when(games.get("K7Q2XM")).thenReturn(details("K7Q2XM"));
+        mvc.perform(get("/api/games/K7Q2XM")).andExpect(status().isOk()).andExpect(jsonPath("$.deck.name").value("Wrestling"));
+    }
+
+    @Test
+    void theAnonymousPlayerEndpointIsGone() throws Exception {
+        mvc.perform(post("/api/players").contentType(MediaType.APPLICATION_JSON).content("{\"username\":\"ann\"}"))
+                .andExpect(status().isNotFound());
     }
 
     // ------------------------------------------------------------ CORS with credentials

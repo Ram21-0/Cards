@@ -63,6 +63,17 @@ public class GameRepository {
         return jdbc.query("select * from games where join_code = ?", GAME, joinCode).stream().findFirst();
     }
 
+    /** Same lookup, but locks the game row until the transaction ends (serializes concurrent joins). */
+    public Optional<Game> findByJoinCodeForUpdate(String joinCode) {
+        return jdbc.query("select * from games where join_code = ? for update", GAME, joinCode).stream().findFirst();
+    }
+
+    public boolean isSeated(UUID gameId, UUID playerId) {
+        Integer n = jdbc.queryForObject("select count(*) from game_players where game_id = ? and player_id = ?",
+                Integer.class, gameId, playerId);
+        return n != null && n > 0;
+    }
+
     /** Adds a human to a seat. */
     public void addHumanSeat(UUID gameId, int seat, UUID playerId) {
         jdbc.update("insert into game_players (game_id, seat, kind, player_id) values (?, ?, ?, ?)",

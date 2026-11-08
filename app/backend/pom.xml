@@ -106,4 +106,50 @@
       </plugin>
     </plugins>
   </build>
+
+  <profiles>
+    <!--
+      Production bundle: copies the static frontend (../frontend) into the jar so Spring Boot serves the site and the API
+      from ONE origin (no CORS, first-party cookies). config.js is left out on purpose: RuntimeConfigController serves it,
+      with an empty apiBase and the GOOGLE_CLIENT_ID setting.
+        mvn -Pbundle-frontend package
+      The default build (local development) does not include the frontend; it runs separately on :8081.
+    -->
+    <profile>
+      <id>bundle-frontend</id>
+      <build>
+        <plugins>
+          <plugin>
+            <groupId>org.apache.maven.plugins</groupId>
+            <artifactId>maven-resources-plugin</artifactId>
+            <executions>
+              <execution>
+                <id>copy-frontend</id>
+                <phase>process-resources</phase>
+                <goals>
+                  <goal>copy-resources</goal>
+                </goals>
+                <configuration>
+                  <outputDirectory>${project.build.outputDirectory}/static</outputDirectory>
+                  <resources>
+                    <resource>
+                      <directory>${project.basedir}/../frontend</directory>
+                      <excludes>
+                        <exclude>node_modules/**</exclude>
+                        <exclude>test/**</exclude>
+                        <exclude>scripts/**</exclude>
+                        <exclude>package*.json</exclude>
+                        <exclude>README.md</exclude>
+                        <exclude>config.js</exclude>
+                      </excludes>
+                    </resource>
+                  </resources>
+                </configuration>
+              </execution>
+            </executions>
+          </plugin>
+        </plugins>
+      </build>
+    </profile>
+  </profiles>
 </project>

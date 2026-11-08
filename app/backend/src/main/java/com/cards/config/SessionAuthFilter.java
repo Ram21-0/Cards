@@ -10,6 +10,7 @@ import org.springframework.web.filter.OncePerRequestFilter;
 
 import java.io.IOException;
 import java.util.Set;
+import java.util.regex.Pattern;
 
 /**
  * Authenticates a request from its session token (cookie or Bearer). An unknown or expired token simply leaves the
@@ -22,8 +23,13 @@ import java.util.Set;
  */
 public class SessionAuthFilter extends OncePerRequestFilter {
 
-    /** Paths whose state-changing requests need the header when sent with a cookie. Extended in stage 2. */
-    static final Set<String> HEADER_PROTECTED = Set.of("/api/me", "/api/auth/logout");
+    /** Paths whose state-changing requests need the header when sent with a cookie. */
+    private static final Set<String> HEADER_PROTECTED = Set.of("/api/me", "/api/auth/logout", "/api/games");
+    private static final Pattern JOIN = Pattern.compile("^/api/games/[^/]+/join$");
+
+    static boolean requiresHeader(String path) {
+        return HEADER_PROTECTED.contains(path) || JOIN.matcher(path).matches();
+    }
     private static final Set<String> SAFE_METHODS = Set.of("GET", "HEAD", "OPTIONS", "TRACE");
 
     private final SessionService sessions;
@@ -43,7 +49,7 @@ public class SessionAuthFilter extends OncePerRequestFilter {
                     .ifPresent(player -> SecurityContextHolder.getContext().setAuthentication(new SessionAuthentication(player)));
 
             if (presented.viaCookie() && !SAFE_METHODS.contains(request.getMethod())
-                    && HEADER_PROTECTED.contains(request.getRequestURI())
+                    && requiresHeader(request.getRequestURI())
                     && request.getHeader("X-Requested-With") == null) {
                 response.setStatus(HttpServletResponse.SC_FORBIDDEN);
                 response.setContentType("application/json");

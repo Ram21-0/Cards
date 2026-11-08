@@ -48,24 +48,27 @@ Defaults — change any of them in one place (the rules engine):
 2. `GET /api/decks` — public decks (+ the caller's own); `GET /api/decks/{id}` — deck with stat definitions;
    `GET /api/decks/{id}/cards` — `{ id, name, img, stats: { height: { value: 73, displayValue: "6'1\"" }, … }, meta: {…} }`
    (stats are in the deck's `display_order`; `displayValue` is formatted server-side from the stat's `display_format`, so clients just render it)
-3. `POST /api/players` `{"username": "ann"}` → `201 {"id": "<uuid>", "username": "ann"}` ✅ built
-   - trimmed + lowercased; valid = 1–8 chars of `[a-z0-9_]`, else `400 {"error": …}`; taken → `409 {"error": "Username already taken"}`
-   - no auth yet: the client keeps the returned `id` as its identity
+3. ~~`POST /api/players`~~ — **removed in stage 2** (it let anyone claim any username). Identity is now Google sign-in; the username is chosen with `PUT /api/me`
+   (see *Authentication* below).
 4. **Lobby:**
-   - `POST /api/games` `{"deckId": "<uuid>", "maxPlayers": 4, "hostId": "<uuid, optional>"}` → `201` ✅ built
+   - `POST /api/games` `{"deckId": "<uuid>", "maxPlayers": 4}` → `201` ✅ built — **requires sign-in**; the host is the session's player
      ```json
      { "id": "<uuid>", "joinCode": "K7Q2XM", "joinUrl": "<frontend base>/?join=K7Q2XM", "status": "WAITING", "maxPlayers": 4,
        "deck": { "id": "<uuid>", "name": "Wrestling" },
        "seats": [ { "seat": 1, "kind": "HUMAN", "username": "ann", "difficulty": null } ] }
      ```
      `deckId` required; `maxPlayers` 2–8; the deck must be public/unlisted (else 404) and have at least `maxPlayers` cards (else 400);
-     `hostId` must exist (else 404) and takes seat 1 (no `hostId` = no seats). `joinUrl` uses `app.frontend-base-url`
+     the signed-in host takes seat 1; a `hostId` in the body (old clients) is ignored. `401 {"error":"Sign in required"}` when signed out;
+     `400 {"error":"Choose a username first"}` when the player has not picked a username (seats show usernames). `joinUrl` uses `app.frontend-base-url`
      (local `http://localhost:8081`, prod `${FRONTEND_ORIGIN}`). Join codes: 6 chars from `ABCDEFGHJKLMNPQRSTUVWXYZ23456789`, `SecureRandom`,
      inserted with `ON CONFLICT DO NOTHING` and retried on collision.
    - `GET /api/games/{joinCode}` (case-insensitive) → same body; 404 if unknown. The deck is looked up without the private filter so joiners see its name. ✅ built
    - Errors are always `{"error": "<message>"}`: 400 (`BadRequestException`, malformed body), 404 (`NotFoundException`), 409 (`ConflictException`).
-   - `POST /api/games/{joinCode}/join` — take the next free seat;
-   `POST /api/games/{joinCode}/cpu` `{difficulty}` — host adds a CPU seat; `DELETE …/seats/{n}` — host removes one;
+   - `POST /api/games/{joinCode}/join` (no body) → `200`, the **same body as `GET /api/games/{joinCode}`** ✅ built — **requires sign-in**.
+     Takes the lowest free seat (the game row is locked while seating, so two people cannot get the last seat). Idempotent: someone already
+     seated just gets the game back (also after it started). `401` signed out · `400 "Choose a username first"` · `404` unknown code ·
+     `409 "Game is full"` · `409 "Game has already started"`.
+   - `POST /api/games/{joinCode}/cpu` `{difficulty}` — host adds a CPU seat; `DELETE …/seats/{n}` — host removes one;
    `POST /api/games/{joinCode}/start` — host only, needs ≥ 2 seats
 5. **Play:** `POST /api/games/{joinCode}/play` `{stat}` — only the current caller; the server resolves the round (CPUs and timeouts handled server-side)
 6. **Live updates:** a WebSocket (or SSE) channel per game pushes lobby changes, "round resolved" events, and each player's own next card.
@@ -116,14 +119,23 @@ Defaults — change any of them in one place (the rules engine):
 - **CSRF rule for cookie sessions:** state-changing requests sent *with the cookie* to `/api/me` and `/api/auth/logout` must carry an `X-Requested-With` header (any value) or get `403 {"error":"Missing X-Requested-With header"}`. Bearer clients are exempt. Stage 2 adds the game endpoints to this list.
 - **CORS:** exact origins from `app.cors.allowed-origins` with `Access-Control-Allow-Credentials: true`; allowed headers `Content-Type, Authorization, X-Requested-With`. The frontend must use `fetch(..., { credentials: 'include' })`.
 - **Config:** `GOOGLE_CLIENT_ID` (env or `.env.<APP_ENV>`; empty by default), `app.session.ttl-days` (30), `app.session.cookie-name`, `app.session.cookie-secure`.
-- **Not done yet:** rate-limiting `/api/auth/*`, a scheduled purge of expired sessions (they are purged whenever a session is created), the stage-2 changes below.
+- **Not done yet:** rate-limiting `/api/auth/*`, a scheduled purge of expired sessions (they are purged whenever a session is created).
 
-**Changes to existing endpoints** *(stage 2 — only after the Frontend session has switched)*
-- `POST /api/games` requires sign-in; the host is the **session's player**. The `hostId` body field is removed (a client-supplied host id would allow impersonation).
-- `POST /api/games/{code}/join` (next backend step) requires sign-in.
-- `GET /api/games/{code}` stays readable without sign-in (join-link preview).
-- The anonymous `POST /api/players` is removed once sign-in ships (`/api/dev/login` replaces it for local development). **The Frontend session must be told before this lands** — it currently stores the returned player id as the host identity.
+**Stage 2 — built (the Frontend session switched first)**
+- `POST /api/games` requires sign-in; the host is the **session's player** and takes seat 1. The `hostId` body field is gone (a client-supplied host id would allow impersonation; if an old client still sends one it is ignored).
+- `POST /api/games/{code}/join` requires sign-in (contract above). `GET /api/games/{code}` stays public (join-link preview).
+- Creating or joining needs a chosen username (`400 "Choose a username first"`), because seats show usernames.
+- The anonymous `POST /api/players` is removed (404). `POST /api/dev/login` replaces it for local development.
+- The `X-Requested-With` rule now also covers cookie-authenticated `POST /api/games` and `POST /api/games/{code}/join`.
 - CORS: `allowCredentials(true)` with the exact origin list (never `*`); frontend `fetch` uses `credentials: 'include'`.
+
+**Serving the frontend from Spring Boot (one origin in production)**
+- `mvn -Pbundle-frontend package` copies `app/frontend` into the jar's `static/` (leaving out `test/`, `scripts/`, `package*.json`, `README.md` and `config.js`),
+  so one jar serves the site at `/` and the API at `/api/**`: no CORS, first-party cookies.
+- `config.js` is generated by the backend (`RuntimeConfigController`): `window.CARDS_CONFIG = {"apiBase":"","googleClientId":"<GOOGLE_CLIENT_ID>"}` — empty `apiBase` = same origin,
+  and the client id comes from the same setting the token verifier checks, so there is one source of truth.
+- The default build (local development) does not include the frontend: it keeps running on :8081 with its own `config.js` and talks to :8080 with CORS-with-credentials.
+- Production settings: `APP_ENV=prod`, `DATABASE_URL`, `GOOGLE_CLIENT_ID`, `FRONTEND_ORIGIN` (the site's own origin, also used for join links); the cookie becomes `__Host-session` + `Secure`.
 
 **Security checklist:** verify the token server-side on every login, including the audience; nonce against replay; `HttpOnly`/`Secure`/`SameSite` cookie; require a custom header (or CSRF token) on state-changing requests; rate-limit `/api/auth/*`; expire and purge old sessions; never log tokens or cookies; store only `sub`, name, avatar and email.
 
@@ -131,19 +143,18 @@ Defaults — change any of them in one place (the rules engine):
 
 **Build order**
 1. *You:* Google Cloud client id.
-2. *Backend:* `002-auth.yaml`; `GoogleTokenVerifier` (+ fake for tests); session service + cookie; Spring Security; the endpoints above; protect `POST /api/games`; tests (expired/forged token, wrong audience, username rules, session expiry, unauthenticated create-game → 401).
-3. *Backend:* serve the frontend from Spring Boot in the `prod` build; CORS-with-credentials for local.
-4. *Frontend:* Google button, `GET /api/me` on load, username screen, logout, 401 handling, join-link preview → sign-in → join; drop `hostId`/`POST /api/players`.
+2. *Backend (done):* `002-auth.yaml`; `GoogleTokenVerifier` (+ fake for tests); session service + cookie; Spring Security; the endpoints above; protect `POST /api/games`; tests (expired/forged token, wrong audience, username rules, session expiry, unauthenticated create-game → 401).
+3. *Backend (done):* serve the frontend from Spring Boot in the bundle build (`-Pbundle-frontend`); CORS-with-credentials for local.
+4. *Frontend (done by the Frontend session):* Google button, `GET /api/me` on load, username screen, logout, 401 handling, join-link preview → sign-in → join; drop `hostId`/`POST /api/players`.
 5. *Later:* the WebSocket handshake reuses the cookie; Android uses the same token endpoint with a bearer token.
 
 ## Phases
 - [x] **0 Connect** — local Postgres (5433) works; Neon dev next
 - [ ] **1 Decks + cards** — seed cards into the Wrestling deck (export Firebase `Data`, or the placeholder 54), repositories/row mappers for the model classes, `GET /api/decks…`, CORS for the frontend origin
 - [ ] **2 Frontend uses it** — frontend fetches decks/cards (keep `data/cards.js` as offline fallback) and reads stat definitions instead of the hardcoded `STATS`
-- [x] **3a Players (anonymous, temporary)** — `POST /api/players`; replaced by Google sign-in below
-- [ ] **3b Google sign-in** — see *Authentication* above
+- [x] **3 Players** — Google sign-in, sessions, username (the temporary anonymous `POST /api/players` is gone) — see *Authentication* above
 - [ ] **4 Rules engine (pure Java, N players)** — `Engine` with the multiplayer rules above, CPU seat logic, placements; unit-test it hard (3-way ties, caller eliminated, uneven deal, simultaneous elimination, conservation of cards)
-- [ ] **5 Lobby + games** — create + read are built; join / add CPU / start still to do
+- [ ] **5 Lobby + games** — create (sign-in), read, join (sign-in) are built; add CPU / start still to do
 - [ ] **6 Live play** — WebSocket events, turn timeout, reconnect (rebuild a player's view from server state), hidden-information check
 - [ ] **7 Leaderboard**
 - [ ] **8 Frontend: lobby + multiplayer table** — share link, seats list, "add CPU", up to 8 players' card counts; the card component stays as is

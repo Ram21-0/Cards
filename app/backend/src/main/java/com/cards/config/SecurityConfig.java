@@ -19,8 +19,8 @@ import java.util.Arrays;
 import java.util.List;
 
 /**
- * Stateless, cookie/bearer session security. Stage 1 is additive: only /api/me needs a signed-in player;
- * everything else stays public so the current frontend keeps working.
+ * Stateless, cookie/bearer session security. Needs a signed-in player: /api/me, creating a game, joining a game.
+ * Everything else (decks, reading a game, the sign-in endpoints themselves) is public.
  */
 @Configuration
 public class SecurityConfig {
@@ -40,6 +40,7 @@ public class SecurityConfig {
                 .authorizeHttpRequests(a -> a
                         .requestMatchers(HttpMethod.OPTIONS, "/**").permitAll()
                         .requestMatchers("/api/me").authenticated()
+                        .requestMatchers(HttpMethod.POST, "/api/games", "/api/games/*/join").authenticated()   // reading a game (join-link preview) stays public
                         .anyRequest().permitAll())
                 .addFilterBefore(new SessionAuthFilter(sessions, cookies), UsernamePasswordAuthenticationFilter.class);
         return http.build();
