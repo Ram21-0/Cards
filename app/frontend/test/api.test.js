@@ -52,3 +52,110 @@ test('offlineDeck builds the same model from the bundled legacy cards', () => {
   assert.equal(d.cards[0].stats.weight.display, '240lbs');
   assert.equal(d.stats.find((s) => s.key === 'rank').higherWins, false);
 });
+
+// ---- create game, sign-in, current player (fetch is mocked) ----
+import { createGame, getGame, fetchMe, updateMe, signOut, deleteAccount, googleSignIn, fetchNonce, devLogin, ApiError } from '../js/api.js';
+
+function mockFetch(status, body) {
+  const calls = [];
+  globalThis.fetch = async (url, init) => {
+    calls.push({ url, init });
+    return { ok: status >= 200 && status < 300, status, json: async () => body };
+  };
+  return calls;
+}
+
+test('every request sends the session cookie and the CSRF header', async () => {
+  const calls = mockFetch(200, {});
+  await getGame('ABC234');
+  await createGame({ deckId: 'd1', maxPlayers: 2 });
+  for (const c of calls) {
+    assert.equal(c.init.credentials, 'include');
+    assert.equal(c.init.headers['X-Requested-With'], 'cards');
+  }
+});
+
+test('createGame POSTs the deck and player count (the host is the signed-in player, so no hostId)', async () => {
+  const game = { id: 'g1', joinCode: 'K7Q2XM', joinUrl: 'http://localhost:8081/?join=K7Q2XM', status: 'WAITING', maxPlayers: 4,
+    deck: { id: 'd1', name: 'Wrestling' }, seats: [{ seat: 1, kind: 'HUMAN', username: 'ann', difficulty: null }] };
+  const calls = mockFetch(201, game);
+  const got = await createGame({ deckId: 'd1', maxPlayers: 4, hostId: 'ignored' });
+  assert.deepEqual(got, game);
+  assert.match(calls[0].url, /\/api\/games$/);
+  assert.equal(calls[0].init.method, 'POST');
+  assert.equal(calls[0].init.headers['Content-Type'], 'application/json');
+  assert.deepEqual(JSON.parse(calls[0].init.body), { deckId: 'd1', maxPlayers: 4 });
+});
+
+test('createGame without a session is an ApiError 401', async () => {
+  mockFetch(401, { error: 'Sign in required' });
+  await assert.rejects(() => createGame({ deckId: 'd1', maxPlayers: 2 }), (e) => e instanceof ApiError && e.status === 401);
+});
+
+test('error responses become ApiError with the server message and status', async () => {
+  mockFetch(409, { error: 'Username already taken' });
+  await assert.rejects(() => updateMe('ann'), (e) => e instanceof ApiError && e.status === 409 && e.message === 'Username already taken');
+  mockFetch(404, { error: 'Game not found' });
+  await assert.rejects(() => getGame('NOPE12'), (e) => e instanceof ApiError && e.status === 404);
+});
+
+test('getGame encodes the join code and uses GET', async () => {
+  const calls = mockFetch(200, { joinCode: 'ABC234' });
+  await getGame('ABC234');
+  assert.match(calls[0].url, /\/api\/games\/ABC234$/);
+  assert.equal(calls[0].init.method, 'GET');
+});
+
+test('a non-JSON error body still gives a readable message', async () => {
+  globalThis.fetch = async () => ({ ok: false, status: 500, json: async () => { throw new Error('not json'); } });
+  await assert.rejects(() => getGame('ABC234'), /HTTP 500/);
+});
+
+test('fetchMe returns the player, and null when signed out (401)', async () => {
+  const me = { id: 'p1', username: 'ann', displayName: 'Ann A', avatarUrl: null, email: 'a@x.com', needsUsername: false };
+  const calls = mockFetch(200, me);
+  assert.deepEqual(await fetchMe(), me);
+  assert.match(calls[0].url, /\/api\/me$/);
+  mockFetch(401, { error: 'Sign in required' });
+  assert.equal(await fetchMe(), null);
+});
+
+test('fetchMe lets other failures through (server down, 500)', async () => {
+  mockFetch(500, { error: 'boom' });
+  await assert.rejects(() => fetchMe(), (e) => e instanceof ApiError && e.status === 500);
+  globalThis.fetch = async () => { throw new TypeError('Failed to fetch'); };
+  await assert.rejects(() => fetchMe(), TypeError);
+});
+
+test('nonce, Google sign-in and dev login use the documented endpoints and bodies', async () => {
+  let calls = mockFetch(200, { nonce: 'abc' });
+  assert.deepEqual(await fetchNonce(), { nonce: 'abc' });
+  assert.equal(calls[0].init.method, 'POST');
+  assert.match(calls[0].url, /\/api\/auth\/nonce$/);
+
+  calls = mockFetch(200, { id: 'p1' });
+  await googleSignIn('the.id.token');
+  assert.match(calls[0].url, /\/api\/auth\/google$/);
+  assert.deepEqual(JSON.parse(calls[0].init.body), { credential: 'the.id.token' });
+
+  calls = mockFetch(200, { id: 'p1' });
+  await devLogin('ann');
+  assert.match(calls[0].url, /\/api\/dev\/login$/);
+  assert.deepEqual(JSON.parse(calls[0].init.body), { username: 'ann' });
+});
+
+test('Google sign-in not configured is a 503 ApiError with the server message', async () => {
+  mockFetch(503, { error: 'Google sign-in is not configured' });
+  await assert.rejects(() => googleSignIn('x'), (e) => e.status === 503 && /not configured/.test(e.message));
+});
+
+test('updateMe PUTs the username; sign out and delete handle 204 (no body)', async () => {
+  let calls = mockFetch(200, { username: 'ann' });
+  await updateMe('ann');
+  assert.equal(calls[0].init.method, 'PUT');
+  assert.deepEqual(JSON.parse(calls[0].init.body), { username: 'ann' });
+
+  globalThis.fetch = async (url, init) => ({ ok: true, status: 204, json: async () => { throw new Error('no body'); } });
+  assert.equal(await signOut(), null);
+  assert.equal(await deleteAccount(), null);
+});

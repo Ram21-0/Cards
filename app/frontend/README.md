@@ -20,8 +20,29 @@ is already allowed in the backend's `local` profile.
   `display` is the server's `displayValue` (e.g. `6'1"`, `240lbs`), so the frontend never formats values itself.
 - `js/engine.js` — pure game rules, driven by the deck's stat definitions (works for any deck, not just wrestling).
 - `js/offline.js` — builds the same deck model from `data/cards.js` when the backend is down (shows a banner with Retry).
-- `js/app.js` — screens: splash/boot, menu (deck picker when there is more than one public deck), gallery, login, game, game over.
+- `js/app.js` — screens: splash/boot, menu, **Gallery** (the list of public decks) → deck (cards + **Create game** panel) → **lobby** (join code), login, game, game over.
 - The card component renders whatever stats the deck defines; the look matches the Android card.
+
+## Sign-in (Google)
+Creating (and, soon, joining) a multiplayer game needs an account; solo play vs the CPU, the deck gallery and join-link previews do not.
+- `config.js` → `googleClientId` (public OAuth web client ID). The backend needs the same value as `GOOGLE_CLIENT_ID`, and the
+  frontend origin must be an *authorized JavaScript origin* of that client in Google Cloud.
+- Flow: `POST /api/auth/nonce` → Google Identity Services button (`js/app.js`, `signIn`) → `POST /api/auth/google {credential}` →
+  session **cookie** (HttpOnly; the page never sees the token). On load the app asks `GET /api/me` who is signed in.
+- First sign-in asks for a username (`PUT /api/me`, 1–8 of `a–z 0–9 _`). **Account** screen: change username, sign out, delete account.
+- Every API call sends `credentials: 'include'` and `X-Requested-With: cards` (see `js/api.js`); a 401 from the server sends the user back to sign-in.
+- **Local development without Google:** when the API is on `localhost`, the sign-in screen shows a "Local development only" form that calls
+  `POST /api/dev/login` (the server only enables it in its `local` profile).
+
+## Creating a game (multiplayer lobby)
+1. **Gallery** lists every public deck (`GET /api/decks`, with `cardCount`). Tap one to see its cards.
+2. In the deck, pick the number of players (2–8, capped by the deck's card count) and tap **Create game**.
+   If you are not signed in you are sent to sign-in first.
+3. `POST /api/games {deckId, maxPlayers}` (the host is the signed-in player) returns a `joinCode` and `joinUrl`. The **lobby** shows the code, a link, **Copy code / Copy link / Share**
+   and the seat list, which refreshes every 4 s.
+4. The link is `<frontend>/?join=CODE`; opening it shows that game's lobby (`GET /api/games/{code}`) with a **Sign in to join** button when signed out. Joining as a player is not built yet.
+
+Dev tip: open the app with `?api=http://localhost:9090` to point it at a different backend (e.g. a mock).
 
 ## Card data (offline fallback only)
 `data/cards.js` holds placeholder wrestlers; `npm run gen-cards` regenerates them. Real cards live in the backend database.

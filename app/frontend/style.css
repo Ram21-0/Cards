@@ -140,3 +140,45 @@ button:disabled { opacity: .5; cursor: default; }
 .toast { position: fixed; left: 50%; bottom: 32px; transform: translateX(-50%); background: #000c; backdrop-filter: blur(6px); border: 1px solid var(--line); padding: 10px 18px; border-radius: 99px; max-width: 90vw; z-index: 10; }
 
 @media (prefers-reduced-motion: reduce) { * { animation: none !important; transition: none !important; } }
+
+/* ===================== deck list, create game, lobby ===================== */
+h3.section { font-size: 14px; text-transform: uppercase; letter-spacing: .08em; color: var(--muted); margin: 4px 0 0; }
+
+.deck-list { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(300px, 100%), 1fr)); gap: 12px; }
+.deck-tile { text-align: left; background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius); padding: 16px; display: flex; flex-direction: column; gap: 8px; transition: border-color .15s, transform .08s; }
+.deck-tile:hover { border-color: var(--accent); }
+.deck-tile:active { transform: scale(.99); }
+.deck-tile h3 { margin: 0; font-size: 20px; }
+.deck-tile p { margin: 0; color: var(--muted); font-size: 14px; }
+.chips { display: flex; flex-wrap: wrap; gap: 6px; }
+.chip { font-size: 12px; padding: 3px 9px; border-radius: 99px; background: var(--bg-2); border: 1px solid var(--line); color: var(--muted); }
+.chip.strong { color: var(--accent); border-color: var(--accent); }
+
+.panel { background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius); padding: 16px; display: flex; flex-direction: column; gap: 12px; }
+.panel h3 { margin: 0; font-size: 18px; }
+.panel .row { display: flex; justify-content: space-between; align-items: center; gap: 12px; flex-wrap: wrap; }
+.panel .hint { margin: 0; }
+.segmented.compact button { padding: 8px 12px; min-width: 38px; }
+.segmented button:disabled { opacity: .35; cursor: default; }
+
+.lobby { align-items: center; text-align: center; }
+.join-code { font: 800 clamp(40px, 14vw, 64px)/1 ui-monospace, "SF Mono", Menlo, monospace; letter-spacing: .18em; padding: 10px 6px 10px 18px; border: 2px dashed var(--accent); border-radius: var(--radius); color: var(--accent); user-select: all; }
+.link { margin: 0; color: var(--muted); font-size: 13px; overflow-wrap: anywhere; user-select: all; }
+.btn-row { display: flex; flex-wrap: wrap; gap: 10px; justify-content: center; }
+
+.seats { list-style: none; margin: 0; padding: 0; display: grid; gap: 8px; }
+.seats li { display: flex; align-items: center; gap: 12px; background: var(--panel); border: 1px solid var(--line); border-radius: 12px; padding: 10px 14px; }
+.seats li.open { color: var(--muted); border-style: dashed; background: transparent; }
+.seats .seat-no { width: 26px; height: 26px; border-radius: 50%; display: grid; place-items: center; font-size: 13px; font-weight: 700; background: var(--bg-2); color: var(--muted); }
+.seats li.taken .seat-no { background: var(--accent); color: var(--accent-ink); }
+
+/* ===================== sign-in / account ===================== */
+.gsi { min-height: 44px; display: grid; place-items: center; }
+.dev-login { display: flex; flex-direction: column; align-items: center; gap: 8px; width: 100%; max-width: 340px; padding: 12px; border: 1px dashed var(--line); border-radius: var(--radius); }
+.dev-login .hint { margin: 0; }
+.btn.danger { color: var(--loss); border-color: var(--loss); background: transparent; }
+.btn.danger:hover { background: rgba(255, 93, 93, .12); }
+.profile { align-items: center; text-align: center; width: 100%; max-width: 340px; }
+.profile h2 { margin: 0; }
+.avatar { width: 72px; height: 72px; border-radius: 50%; object-fit: cover; border: 2px solid var(--accent); }
+.avatar.blank { display: grid; place-items: center; font-size: 30px; font-weight: 800; background: var(--bg-2); color: var(--accent); }
