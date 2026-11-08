@@ -20,6 +20,7 @@ import org.junit.jupiter.api.Test;
 import java.time.Duration;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 
 import static com.cards.live.LiveTestKit.CODE;
 import static com.cards.live.LiveTestKit.FRONTEND;
@@ -143,6 +144,29 @@ class LivePlayTest {
         assertEquals("S2-2", revealed.get("cards").get("2").get("name").asText());
         assertEquals(revealed, events(forAnn).stream().filter(e -> "revealed".equals(e.get("type").asText())).findFirst().orElseThrow(),
                 "both players get the identical reveal");
+    }
+
+    @Test
+    void theOwnPileListsOnlyMyCardsAndNeverSomeoneElses() throws Exception {
+        startGame(NO_CHOOSE, List.of(List.of(card(1, 1, 9, 1), card(1, 2, 5, 5), card(1, 3, 4, 4)), List.of(card(2, 1, 3, 3), card(2, 2, 4, 4))), true, true);
+
+        assertEquals(List.of("S1-2", "S1-3"), pileNames(forAnn), "seat 1's top card is in play (committed), the others follow");
+        assertEquals(List.of("S2-2"), pileNames(forBob));
+        assertTrue(forBob.sent.stream().noneMatch(m -> m.contains("S1-")), "bob never receives a seat 1 card, pile included");
+        assertTrue(forAnn.sent.stream().noneMatch(m -> m.contains("S2-")), "ann never receives a seat 2 card, pile included");
+        assertEquals(Set.of("id", "name"), fieldNames(lastView(forAnn).get("ownPile").get(0)), "names and ids only, no stats");
+    }
+
+    private static List<String> pileNames(FakeSocket socket) throws Exception {
+        List<String> names = new java.util.ArrayList<>();
+        lastView(socket).get("ownPile").forEach(c -> names.add(c.get("name").asText()));
+        return names;
+    }
+
+    private static java.util.Set<String> fieldNames(JsonNode node) {
+        java.util.Set<String> names = new java.util.HashSet<>();
+        node.fieldNames().forEachRemaining(names::add);
+        return names;
     }
 
     private void assertNoSeat1CardIn(FakeSocket socket) {

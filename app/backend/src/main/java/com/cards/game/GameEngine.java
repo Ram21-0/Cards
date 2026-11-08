@@ -317,8 +317,13 @@ public final class GameEngine {
         List<Card> own = canChoose ? List.copyOf(seat.hand) : seat.hand.isEmpty() ? List.of() : List.of(seat.hand.get(0));
         Map<Integer, Integer> sizes = new LinkedHashMap<>();
         for (Seat s : seats) sizes.put(s.number, handSize(s.number));
+        // The cards that follow this round's: the whole hand while the seat may still choose (any card could be the one played),
+        // or when nothing of theirs is in play; otherwise the top card is the one being played and is left out.
+        boolean topIsInPlay = !over() && !inFlight.containsKey(seatNumber) && contenders.contains(seatNumber)
+                && !canChoose && !settings.mayChoose(seat.hand.size());
+        List<Card> pile = topIsInPlay && !seat.hand.isEmpty() ? List.copyOf(seat.hand.subList(1, seat.hand.size())) : List.copyOf(seat.hand);
         return new PlayerView(seatNumber, phase, round, callerSeat, stat == null ? null : stat.key(), clashLevel, pot.size(),
-                deadline, List.copyOf(contenders), sizes, own, inFlight.get(seatNumber), canChoose, canCall);
+                deadline, List.copyOf(contenders), sizes, own, inFlight.get(seatNumber), canChoose, canCall, pile);
     }
 
     // ------------------------------------------------------------------------------------------ test hooks

@@ -435,7 +435,7 @@ class AuthWebTest {
         }
         com.cards.live.ViewMessage view = new com.cards.live.ViewMessage("view", java.time.Instant.parse("2026-11-08T10:00:00Z"), 1,
                 "AWAIT_CALL", 1, 1, null, 0, 0, null, java.util.List.of(1, 2), java.util.Map.of(1, 3, 2, 3), java.util.List.of(), null,
-                false, true, java.util.Map.of());
+                false, true, java.util.Map.of(), java.util.List.of());
         when(live.call("K7Q2XM", ANN, "power")).thenReturn(view);
         when(live.choose("K7Q2XM", ANN, 17)).thenReturn(view);
 

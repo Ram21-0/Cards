@@ -61,7 +61,8 @@ public class LiveMessages {
                 v.clashLevel(), v.potSize(), v.deadline(), v.contenders(), v.handSizes(),
                 v.ownHand().stream().map(c -> CardResponse.from(c, game.deck())).toList(),
                 v.committed() == null ? null : CardResponse.from(v.committed(), game.deck()),
-                v.canChoose(), v.canCall(), game.placements());
+                v.canChoose(), v.canCall(), game.placements(),
+                v.ownPile().stream().map(c -> new ViewMessage.PileCard(c.id(), c.name())).toList());
     }
 
     /** What just happened, for everyone in the game (identical for all: events never hold hidden cards). */

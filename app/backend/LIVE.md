@@ -121,6 +121,7 @@ After the game has started a reconnecting client also gets a `lobby` first (stat
   "handSizes": {"1": 6, "2": 6},
   "ownHand": [ {"id":"…","name":"…","stats":{…}} ],
   "committed": null, "canChoose": false, "canCall": true,
+  "ownPile": [ {"id": 17, "name": "Savage Kane"}, {"id": 4, "name": "Iron Duke"} ],
   "placements": {}
 }
 ```
@@ -136,6 +137,11 @@ After the game has started a reconnecting client also gets a `lobby` first (stat
   (turn timeout, or the end of a clash race); compare it with `serverTime`, not with your own clock.
 * `ownHand` is only your top card normally; when `canChoose` is true it is your whole hand (that is what you choose from).
   `committed` is the card you already put in play this round (only you see it until it is revealed).
+* `ownPile` is *your* other cards in the order they will come up from the next turn on (first = next), as `{id, name}` only (no stats).
+  It leaves out the card in play this round: your `committed` card, or your top card when you will not be offered CHOOSE this round.
+  While CHOOSE is still open to you (`canChoose`, or you will be offered it once the stat is known) nothing is left out: it is your whole
+  pile in order. After a CHOOSE the chosen card leaves and the rest keep their order; cards a winner takes join the bottom. Empty when you
+  have no other cards. Never contains anyone else's cards. (Also in the `view` answered by `call`/`choose`.)
 * `placements` is `{seat: placement}` for seats already decided (eliminated players, or everyone at the end).
 
 **`events`**: what just happened, for animations. Sent to every player, **identical for all**, followed by each player's `view`.
