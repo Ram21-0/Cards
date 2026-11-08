@@ -1,27 +1,28 @@
 # Cards — frontend (web)
 
-Plain HTML/CSS/JS, no build step. Looks and flows like the Android app
-(`app/src/main/res`): same colours, card layout, checklist, result text and buttons.
+Plain HTML/CSS/JS, no build step. Loads decks and cards from the Java backend (`app/backend`);
+if the backend is unreachable it falls back to the bundled cards in `data/cards.js`.
 
 ```bash
 cd app/frontend
-npm start        # http://localhost:8081  (any static server works; or open index.html)
-npm test         # engine unit tests (Node 18+)
+npm start        # http://localhost:8081  (any static server works)
+npm test         # engine / API-mapping tests (Node 18+)
 ```
+Start the backend first for live data (`app/backend`, default http://localhost:8080). CORS for `http://localhost:8081`
+is already allowed in the backend's `local` profile.
 
-## Layout
-- `js/engine.js` — pure game rules + CPU (no DOM, tested)
-- `js/app.js` — screens: splash, menu, exhibition/viewer, login, game, game over
-- `style.css` — Android colours (`colors.xml`) and card/button styles
-- `data/cards.js` — card data (currently **placeholder** wrestlers)
-- `assets/placeholder.png` — the `?` silhouette from `drawable/images.png`
+## Configuration
+`config.js` — `apiBase` is the backend URL. Edit it per environment (or generate the file at deploy time).
 
-## Card data
-Real names/images/stats were in the Firebase `Data` node, which isn't in the repo. Replace
-`data/cards.js` (or later, load from the backend) with:
+## How data flows
+- `js/api.js` — `GET /api/decks`, `GET /api/decks/{id}` (stat definitions), `GET /api/decks/{id}/cards`, mapped into one deck model:
+  `{ stats: [{key, label, higherWins}], cards: [{ id, name, img, brand, stats: { key: { value, display } } }] }`.
+  `display` is the server's `displayValue` (e.g. `6'1"`, `240lbs`), so the frontend never formats values itself.
+- `js/engine.js` — pure game rules, driven by the deck's stat definitions (works for any deck, not just wrestling).
+- `js/offline.js` — builds the same deck model from `data/cards.js` when the backend is down (shows a banner with Retry).
+- `js/app.js` — screens: splash/boot, menu (deck picker when there is more than one public deck), gallery, login, game, game over.
+- The card component renders whatever stats the deck defines; the look matches the Android card.
 
-```js
-window.CARDS = [{ id, name, brand: 'raw' | 'sd', img, rank, fight, chest, biceps, feet, inches, weight }];
-```
-`brand: 'sd'` renders blue like the Android app; anything else is red. `rank` must be unique; lower wins.
-Login is stored locally until the backend exists.
+## Card data (offline fallback only)
+`data/cards.js` holds placeholder wrestlers; `npm run gen-cards` regenerates them. Real cards live in the backend database.
+Login is still stored locally until the backend has players (phase 3 in `app/backend/PLAN.md`).

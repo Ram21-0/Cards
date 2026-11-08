@@ -1,34 +1,19 @@
 // Pure game engine: no DOM, no I/O. Fully unit-testable.
-
-export const STATS = [
-  { key: 'rank',   label: 'Rank',   higherWins: false, fmt: (c) => `${c.rank}` },
-  { key: 'fight',  label: 'Fight', higherWins: true,  fmt: (c) => `${c.fight}` },
-  { key: 'chest',  label: 'Chest',  higherWins: true,  fmt: (c) => `${c.chest}` },
-  { key: 'biceps', label: 'Biceps', higherWins: true,  fmt: (c) => `${c.biceps}` },
-  { key: 'height', label: 'Height', higherWins: true,  fmt: (c) => `${Math.floor(c.height / 12)}'${c.height % 12}"` },
-  { key: 'weight', label: 'Weight', higherWins: true,  fmt: (c) => `${c.weight}lbs` },
-];
+//
+// The engine knows nothing about wrestling. A deck supplies:
+//   stats : [{ key, label, higherWins }]            (from the API's deck stat definitions)
+//   cards : [{ id, name, stats: { key: { value } } }]
+// so any deck (wrestling, cricket, ...) plays the same way.
 
 export const RESULT = { WIN: 'win', LOSS: 'loss', CLASH: 'clash' };
+export const DIFFICULTY = { EASY: 'easy', NORMAL: 'normal', HARD: 'hard' };
 
-/** Normalise a raw card: derive total-inches height. */
-export function normaliseCard(c) {
-  const height = c.height ?? c.feet * 12 + c.inches;
-  return { ...c, height };
-}
-
-export function statByKey(key) {
-  const s = STATS.find((x) => x.key === key);
-  if (!s) throw new Error(`Unknown stat: ${key}`);
-  return s;
-}
-
-/** Compare two cards on a stat from the first card's point of view. */
-export function compare(a, b, key) {
-  const s = statByKey(key);
-  if (a[key] === b[key]) return RESULT.CLASH;
-  const aBigger = a[key] > b[key];
-  return aBigger === s.higherWins ? RESULT.WIN : RESULT.LOSS;
+/** Compare two cards on a stat definition, from the first card's point of view. */
+export function compare(a, b, stat) {
+  const x = a.stats[stat.key].value;
+  const y = b.stats[stat.key].value;
+  if (x === y) return RESULT.CLASH;
+  return (x > y) === stat.higherWins ? RESULT.WIN : RESULT.LOSS;
 }
 
 export function shuffle(arr, rng = Math.random) {
@@ -44,13 +29,13 @@ export function shuffle(arr, rng = Math.random) {
  * For every card and stat: the fraction of the deck that card beats (0..1).
  * Used by the CPU to judge how strong a stat really is.
  */
-export function buildStrengths(cards) {
+export function buildStrengths(cards, stats) {
   const map = new Map();
   for (const c of cards) {
     const strengths = {};
-    for (const s of STATS) {
+    for (const s of stats) {
       let beaten = 0;
-      for (const o of cards) if (o !== c && compare(c, o, s.key) === RESULT.WIN) beaten++;
+      for (const o of cards) if (o !== c && compare(c, o, s) === RESULT.WIN) beaten++;
       strengths[s.key] = beaten / Math.max(1, cards.length - 1);
     }
     map.set(c.id, strengths);
@@ -58,11 +43,9 @@ export function buildStrengths(cards) {
   return map;
 }
 
-export const DIFFICULTY = { EASY: 'easy', NORMAL: 'normal', HARD: 'hard' };
-
-/** CPU picks a stat for its top card. */
-export function cpuChoose(card, strengths, difficulty = DIFFICULTY.NORMAL, rng = Math.random) {
-  const keys = STATS.map((s) => s.key);
+/** CPU picks a stat key for its top card. */
+export function cpuChoose(card, strengths, stats, difficulty = DIFFICULTY.NORMAL, rng = Math.random) {
+  const keys = stats.map((s) => s.key);
   if (difficulty === DIFFICULTY.EASY) return keys[Math.floor(rng() * keys.length)];
   const noise = difficulty === DIFFICULTY.NORMAL ? 0.25 : 0;
   let best = keys[0];
@@ -77,13 +60,15 @@ export function cpuChoose(card, strengths, difficulty = DIFFICULTY.NORMAL, rng =
 export class Game {
   /**
    * @param {object[]} cards full deck (even count recommended)
-   * @param {{rng?: ()=>number, difficulty?: string, firstTurn?: 'player'|'cpu'}} opts
+   * @param {{stats: object[], rng?: ()=>number, difficulty?: string, firstTurn?: 'player'|'cpu'}} opts
    */
-  constructor(cards, opts = {}) {
+  constructor(cards, opts) {
+    if (!opts?.stats?.length) throw new Error('Game needs the deck stat definitions (opts.stats)');
+    this.stats = opts.stats;
     this.rng = opts.rng ?? Math.random;
     this.difficulty = opts.difficulty ?? DIFFICULTY.NORMAL;
-    this.deck = cards.map(normaliseCard);
-    this.strengths = buildStrengths(this.deck);
+    this.deck = [...cards];
+    this.strengths = buildStrengths(this.deck, this.stats);
     const shuffled = shuffle(this.deck, this.rng);
     this.player = shuffled.filter((_, i) => i % 2 === 0);
     this.cpu = shuffled.filter((_, i) => i % 2 === 1);
@@ -101,9 +86,16 @@ export class Game {
   get playerCard() { return this.player[0] ?? null; }
   get cpuCard() { return this.cpu[0] ?? null; }
 
-  /** The stat the CPU will call this round (only meaningful on the CPU's turn). */
+  /** The stat definition for a key. */
+  stat(key) {
+    const s = this.stats.find((x) => x.key === key);
+    if (!s) throw new Error(`Unknown stat: ${key}`);
+    return s;
+  }
+
+  /** The stat key the CPU will call this round (only meaningful on the CPU's turn). */
   cpuPick() {
-    return cpuChoose(this.cpuCard, this.strengths, this.difficulty, this.rng);
+    return cpuChoose(this.cpuCard, this.strengths, this.stats, this.difficulty, this.rng);
   }
 
   /**
@@ -113,9 +105,10 @@ export class Game {
    */
   play(statKey) {
     if (this.over) throw new Error('Game is over');
+    const stat = this.stat(statKey);
     const p = this.player.shift();
     const c = this.cpu.shift();
-    const result = compare(p, c, statKey);
+    const result = compare(p, c, stat);
     const caller = this.turn;
     this.round++;
 

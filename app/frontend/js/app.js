@@ -1,11 +1,14 @@
-import { Game, STATS, statByKey, normaliseCard, RESULT, DIFFICULTY } from './engine.js';
+import { Game, RESULT, DIFFICULTY } from './engine.js';
+import { fetchDecks, fetchDeck } from './api.js';
+import { offlineDeck } from './offline.js';
 
 const app = document.getElementById('app');
-const CARDS = (window.CARDS ?? []).map(normaliseCard);
 const PLACEHOLDER = 'assets/placeholder.png';
 const SPLASH_MS = 1400;
 
 let game = null;
+let deck = null;    // the deck being played: { id, name, source, stats, cards } (see api.js)
+let decks = [];     // public decks the backend offers (empty when offline)
 let screenId = 0; // bumps on every screen change so stale timers can bail out
 let difficulty = store('difficulty') || DIFFICULTY.NORMAL;
 
@@ -44,15 +47,36 @@ function cardView(w) {
   return el('article', { class: `card ${w.brand === 'sd' ? 'sd' : 'raw'}` },
     el('div', { class: 'image' }, img),
     el('h2', { class: 'name' }, w.name),
-    el('div', { class: 'grid' },
-      STATS.map((s) => el('span', { class: 'label' }, s.label)),
-      STATS.map((s) => el('span', { class: 'value' }, s.fmt(w)))));
+    el('div', { class: 'grid', style: `--cols:${deck.stats.length}` },
+      deck.stats.map((s) => el('span', { class: 'label' }, s.label)),
+      deck.stats.map((s) => el('span', { class: 'value' }, w.stats[s.key].display))));
 }
 
 /* ---------- splash ---------- */
-function splash() {
+async function boot() {
   show(screen('center', el('h1', { class: 'logo' }, 'CARDS'), el('p', { class: 'tagline' }, 'Are you ready?')));
-  setTimeout(menu, SPLASH_MS);
+  await Promise.all([loadDecks(), new Promise((r) => setTimeout(r, SPLASH_MS))]);
+  menu();
+}
+
+/** Loads the deck list + the chosen deck from the backend; falls back to the bundled cards if it is unreachable. */
+async function loadDecks() {
+  try {
+    decks = await fetchDecks();
+    if (!decks.length) throw new Error('backend has no public decks');
+    const saved = store('deckId');
+    await selectDeck((decks.find((d) => d.id === saved) ?? decks[0]).id);
+  } catch (e) {
+    console.warn('Backend unavailable, using bundled cards:', e.message);
+    decks = [];
+    deck = offlineDeck(window.CARDS);
+  }
+}
+
+/** Switches the active deck (keeps the current one if loading fails). */
+async function selectDeck(id) {
+  deck = await fetchDeck(id);
+  store('deckId', id);
 }
 
 /* ---------- menu ---------- */
@@ -66,33 +90,60 @@ function menu() {
         seg.querySelectorAll('button').forEach((b) => b.setAttribute('aria-pressed', String(b === e.currentTarget)));
       },
     }, d[0].toUpperCase() + d.slice(1))));
+  const deckPicker = decks.length > 1
+    ? el('label', { class: 'row' }, el('span', {}, 'Deck'),
+      el('select', { class: 'field', 'aria-label': 'Deck', onchange: changeDeck },
+        decks.map((d) => el('option', { value: d.id, selected: d.id === deck.id }, d.name))))
+    : el('p', { class: 'whoami' }, `Deck: ${deck.name}`);
+  const offlineNotice = deck.source === 'offline'
+    ? el('div', { class: 'notice' }, 'Backend unreachable — using the bundled cards. ',
+      el('button', { class: 'btn small', onclick: retryBackend }, 'Retry'))
+    : '';
   show(screen('center menu',
     el('h1', { class: 'logo' }, 'CARDS'),
     el('p', { class: 'tagline' }, 'Pick a stat, beat the CPU’s card, win every card.'),
+    offlineNotice,
     el('button', { class: 'btn primary wide', onclick: startGame }, 'Play'),
-    el('button', { class: 'btn wide', onclick: gallery }, 'Card gallery'),
+    el('button', { class: 'btn wide', onclick: () => gallery() }, 'Card gallery'),
     el('button', { class: 'btn wide', onclick: login }, user ? 'Change player' : 'Login'),
+    deckPicker,
     el('div', { class: 'row' }, el('span', {}, 'CPU difficulty'), seg),
     user ? el('p', { class: 'whoami' }, `Playing as ${user}`) : ''));
 }
 
+async function changeDeck(e) {
+  try {
+    await selectDeck(e.target.value);
+    toast(`Deck: ${deck.name}`);
+  } catch {
+    toast('Could not load that deck');
+    e.target.value = deck.id;
+  }
+}
+
+async function retryBackend() {
+  toast('Connecting…');
+  await loadDecks();
+  menu();
+}
+
 /* ---------- gallery ---------- */
 function gallery(filter = 'all') {
-  const list = CARDS.filter((c) => filter === 'all' || (filter === 'sd') === (c.brand === 'sd'));
+  const list = deck.cards.filter((c) => filter === 'all' || (filter === 'sd') === (c.brand === 'sd'));
   const chip = (id, label) => el('button', { class: 'btn small ghost', 'aria-pressed': String(filter === id), onclick: () => gallery(id),
     style: filter === id ? 'border-color:var(--accent);color:var(--accent)' : '' }, label);
   show(screen('',
     el('div', { class: 'topbar' }, el('button', { class: 'btn small', onclick: menu }, '← Menu'), el('h2', {}, `Gallery · ${list.length}`), el('span')),
     el('div', { class: 'filters' }, chip('all', 'All'), chip('raw', 'Raw'), chip('sd', 'SD')),
     el('div', { class: 'gallery' }, list.map((w) =>
-      el('button', { class: 'cell', 'aria-label': w.name, onclick: () => viewCard(CARDS.indexOf(w)) }, cardView(w))))));
+      el('button', { class: 'cell', 'aria-label': w.name, onclick: () => viewCard(deck.cards.indexOf(w)) }, cardView(w))))));
 }
 
 function viewCard(i) {
-  const n = CARDS.length;
+  const n = deck.cards.length;
   show(screen('',
     el('div', { class: 'topbar' }, el('button', { class: 'btn small', onclick: () => gallery() }, '← Gallery'), el('h2', {}, `${i + 1} / ${n}`), el('span')),
-    el('div', { class: 'card-wrap' }, cardView(CARDS[i])),
+    el('div', { class: 'card-wrap' }, cardView(deck.cards[i])),
     el('div', { class: 'viewer-nav' },
       el('button', { class: 'btn', onclick: () => viewCard((i + n - 1) % n) }, '← Prev'),
       el('button', { class: 'btn', onclick: () => viewCard((i + 1) % n) }, 'Next →'))));
@@ -121,8 +172,8 @@ function login() {
 
 /* ---------- game ---------- */
 function startGame() {
-  if (CARDS.length < 2) { toast('No cards loaded'); return; }
-  game = new Game(CARDS, { difficulty });
+  if (deck.cards.length < 2) { toast('This deck has too few cards'); return; }
+  game = new Game(deck.cards, { stats: deck.stats, difficulty });
   startedAt = Date.now();
   nextRound();
 }
@@ -156,8 +207,8 @@ function playerTurn() {
   gameScreen(
     el('p', { class: 'status' }, 'Your turn — pick a stat'),
     el('div', { class: 'card-wrap' }, cardView(w)),
-    el('div', { class: 'stat-grid' }, STATS.map((s) =>
-      el('button', { class: 'stat-btn', onclick: () => resolve(s.key) }, el('span', {}, s.label), el('b', {}, s.fmt(w))))));
+    el('div', { class: 'stat-grid' }, game.stats.map((s) =>
+      el('button', { class: 'stat-btn', onclick: () => resolve(s.key) }, el('span', {}, s.label), el('b', {}, w.stats[s.key].display)))));
 }
 
 function cpuTurn() {
@@ -169,7 +220,7 @@ function cpuTurn() {
   const alive = () => screenId === id;
   setTimeout(() => {
     if (!alive()) return;
-    status.replaceChildren(`CPU picks ${statByKey(key).label}`);
+    status.replaceChildren(`CPU picks ${game.stat(key).label}`);
     setTimeout(() => alive() && resolve(key), 1000);
   }, 900);
 }
@@ -184,7 +235,7 @@ function resolve(key) {
   const w1 = game.playerCard;
   const w2 = game.cpuCard;
   const r = game.play(key);
-  const s = statByKey(key);
+  const s = game.stat(key);
   const b = BANNER[r.result];
   const note = r.result === RESULT.CLASH ? `Tied on ${s.label}. Both cards go to the pot (${game.potCount}).`
     : `${r.caller === 'player' ? 'You' : 'CPU'} called ${s.label}${s.higherWins ? '' : ' (lower wins)'}`;
@@ -200,7 +251,7 @@ function resolve(key) {
     el('div', { class: `banner ${b.cls}`, role: 'status' },
       el('h2', {}, b.title),
       el('p', {}, note),
-      el('div', { class: 'vs' }, el('span', {}, `You ${s.fmt(w1)}`), el('span', {}, '·'), el('span', {}, `CPU ${s.fmt(w2)}`))),
+      el('div', { class: 'vs' }, el('span', {}, `You ${w1.stats[key].display}`), el('span', {}, '·'), el('span', {}, `CPU ${w2.stats[key].display}`))),
     el('div', { class: 'tabs' }, el('div', { class: 'segmented' }, tab('me', 'Your card'), tab('cpu', 'CPU card'))),
     versus,
     el('div', { class: 'dock' }, go));
@@ -224,4 +275,4 @@ function gameOver() {
       el('button', { class: 'btn', onclick: menu }, 'Menu'))));
 }
 
-splash();
+boot();
