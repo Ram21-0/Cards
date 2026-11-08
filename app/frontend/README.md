@@ -23,6 +23,17 @@ is already allowed in the backend's `local` profile.
 - `js/app.js` — screens: splash/boot, menu, **Gallery** (the list of public decks) → deck (cards + **Create game** panel) → **lobby** (join code), login, game, game over.
 - The card component renders whatever stats the deck defines; the look matches the Android card.
 
+## Navigation, the Back button and leaving a game
+Screens are hash routes (`js/nav.js`, wired up in `js/app.js`), so the browser Back/Forward buttons and the phone's Back gesture move between screens
+instead of leaving the site: `#/` menu · `#/decks` gallery · `#/deck/<id>` · `#/deck/<id>/card/<n>` · `#/lobby/<code>` · `#/play` · `#/signin` · `#/username` · `#/account`.
+- **A game in progress is never left silently.** Back (or the Quit button, or editing the URL) shows **"Leave this game?" — Stay / Leave**.
+  Stay keeps the exact game (the CPU waits while the dialog is open); Leave goes to the menu. Reload and tab close show the browser's own warning (`beforeunload`).
+- The routing/guard rules are pure functions (`backDecision`, `needsUnloadGuard`, `redirectFor`, `upAction`) with unit tests in `test/nav.test.js`.
+- `leaveGame()` in `app.js` is the single place a game ends. A live multiplayer game will also tell the server there (`POST /api/games/{code}/leave`, see `app/backend/LIVE.md`).
+- Up-buttons (← Decks, ← Menu…) go Back when the previous screen is the parent, otherwise they replace the current entry, so the history does not pile up.
+- Sign-in and username screens return to where the user came from (`afterAuth`); `#/play` without a running game (a reload) goes to the menu.
+- Shared links `?join=CODE` still work: they are turned into `#/lobby/CODE` on load (other query params such as `?api=` are kept).
+
 ## Sign-in (Google)
 Creating (and, soon, joining) a multiplayer game needs an account; solo play vs the CPU, the deck gallery and join-link previews do not.
 - `config.js` → `googleClientId` (public OAuth web client ID). The backend needs the same value as `GOOGLE_CLIENT_ID`, and the
