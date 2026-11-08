@@ -74,7 +74,9 @@ public class DatabaseConfig {
                         .filter(kv -> !kv.isEmpty() && !kv.startsWith("channel_binding="))
                         .forEach(params::add);
             }
-            if (params.stream().noneMatch(kv -> kv.startsWith("sslmode="))) params.add("sslmode=require");
+            // Remote hosts (Neon) need SSL; a local Postgres normally has it off. An explicit ?sslmode= always wins.
+            boolean local = List.of("localhost", "127.0.0.1", "::1", "[::1]").contains(uri.getHost());
+            if (params.stream().noneMatch(kv -> kv.startsWith("sslmode="))) params.add(local ? "sslmode=disable" : "sslmode=require");
             String query = String.join("&", params);
 
             String jdbc = "jdbc:postgresql://" + uri.getHost() + ":" + port + uri.getRawPath() + "?" + query;

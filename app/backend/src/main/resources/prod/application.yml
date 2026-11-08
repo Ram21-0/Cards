@@ -1,0 +1,17 @@
+# Production (APP_ENV=prod)
+logging:
+  level:
+    com.cards: INFO
+
+app:
+  cors:
+    allowed-origins: ${FRONTEND_ORIGIN}      # set on the host, e.g. https://cards.example.com
+
+server:
+  error:
+    include-message: never
+    include-stacktrace: never
+
+spring:
+  flyway:
+    clean-disabled: true

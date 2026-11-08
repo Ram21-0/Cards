@@ -15,8 +15,9 @@ see [PLAN.md](PLAN.md) for what to build and in what order.
 3. **Save it locally:**
    ```bash
    cd app/backend
-   cp .env.example .env      # .env is git-ignored — never commit it
-   # edit .env and paste your string after DATABASE_URL=   (no quotes)
+   # .env.local and .env.prod already exist (git-ignored — never commit them).
+   # Edit .env.local and paste your Neon *dev* branch string after DATABASE_URL=   (no quotes)
+   # Edit .env.prod only if you want to run against prod from your machine:  APP_ENV=prod mvn spring-boot:run
    ```
 4. **Install tools** (JDK 21+ is enough; you have 25): `brew install maven`
 5. **Run:**
@@ -34,14 +35,23 @@ Troubleshooting
 - `SSL` errors → keep `sslmode=require`.
 - Slow first request → free-tier compute auto-suspends after ~5 min idle; the pool timeout is 30 s to allow for wake-up.
 - Leaked the password? Neon console → Roles → reset password.
-- In production set `DATABASE_URL` as an environment variable on the host instead of a `.env` file.
+- In production set `DATABASE_URL` as an environment variable on the host instead of using `.env.prod`.
+- In IntelliJ the app reads `.env.local` only if the run configuration's working directory is `app/backend`; otherwise add `DATABASE_URL` under Environment variables (use `APP_ENV=prod` to switch files).
+
+## Lombok
+Added (`@Getter`, `@Builder`, `@Slf4j`, `@RequiredArgsConstructor`, …). Two things to know:
+- The pom pins Lombok 1.18.42 and lists it under `annotationProcessorPaths` — needed on JDK 23+, which no longer
+  runs annotation processors from the classpath automatically.
+- In IntelliJ: **Settings → Build, Execution, Deployment → Compiler → Annotation Processors → Enable annotation processing**.
+  (IntelliJ 2023.1+ bundles the Lombok plugin.) Reload Maven after pulling pom changes.
 
 ## 2. Code overview
 
 ```
 app/backend
 ├── pom.xml                         Spring Boot 3.5, Java 21, web + jdbc + postgres + flyway
-├── .env.example  /  .env           DATABASE_URL (the .env copy is git-ignored)
+├── .env.local(.example)            local DB (Neon dev branch)   — real file git-ignored
+├── .env.prod(.example)             prod DB (Neon main branch)   — real file git-ignored
 └── src/main
     ├── java/com/cards
     │   ├── CardsApplication.java   entry point (@SpringBootApplication)            [provided]
@@ -50,9 +60,11 @@ app/backend
     │       │                       HikariCP pool tuned for Neon's free tier
     │       └── ConnectionCheck.java logs "Database connected" at startup            [provided, deletable]
     └── resources
-        ├── application.yml         loads .env, server port                          [provided]
+        ├── application.yml         common settings; imports local/ or prod/ + the .env file   [provided]
+        ├── local/application.yml   dev-only, non-secret (debug logging, CORS for localhost:8081)
+        ├── prod/application.yml    prod-only, non-secret (info logging, CORS from FRONTEND_ORIGIN)
         └── db/migration
-            └── V1__init.sql        cards / players / games tables                   [provided, editable until first run]
+            └── V1__init.sql        players / decks / deck_stats / cards / games / game_players + Wrestling deck   [editable until first shared run]
 ```
 
 How the pieces fit: `DatabaseConfig` defines the one `DataSource` bean → Spring Boot's Flyway runs the

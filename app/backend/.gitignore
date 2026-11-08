@@ -1,4 +1,7 @@
+# real env files are secrets; the *.example templates are committed
 .env
+.env.*
+!.env.*.example
 target/
 *.iml
 .idea/

@@ -1,9 +1,13 @@
+# Common settings. Per-environment, non-secret settings live in local/ and prod/ (chosen by APP_ENV, default "local").
+# Secrets (DATABASE_URL) never go in resources/ — they come from .env.<APP_ENV> or real environment variables.
 spring:
   application:
     name: cards-backend
   config:
-    # Loads KEY=value lines from app/backend/.env if the file exists (local dev only).
-    import: optional:file:.env[.properties]
+    # Later imports override earlier ones. Real environment variables override all of them.
+    import:
+      - optional:classpath:/${APP_ENV:local}/application.yml
+      - optional:file:.env.${APP_ENV:local}[.properties]
   flyway:
     enabled: true
 

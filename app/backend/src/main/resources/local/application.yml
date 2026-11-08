@@ -1,0 +1,12 @@
+# Local development (APP_ENV unset or "local")
+logging:
+  level:
+    com.cards: DEBUG
+
+app:
+  cors:
+    allowed-origins: http://localhost:8081   # the frontend dev server
+
+spring:
+  flyway:
+    clean-disabled: true
