@@ -65,7 +65,7 @@ All strategies are fair: they use only the CPU's own hand, the deck (every card 
 **Noise** (0–1) is added to every judgement, as a share of the strategy's value range (0 = always the best option).
 
 - **Choosing a stat:** the stat the strategy rates best for the card in play (`random`: any).
-- **CHOOSE:** the caller chooses before the stat is known, so cards are judged by their strongest single stat; everyone else knows the stat and picks the card that rates best for it.
+- **CHOOSE:** the caller chooses before the stat is known, so cards are judged by their strongest single stat; everyone else knows the stat and picks the card that rates best for it. If **no** card in the hand can beat or tie any card the CPU does not hold on that stat, the percentile strategies (`deck-percentile`, `opponent-percentile`) pick a **random** card (they have no sacrifice logic); `smart` instead gives away the card it least wants to keep.
 - **Delay in a clash race:** random 1.5–4 s, so humans can win the race. In a normal round a CPU decides immediately.
 
 ## 8. Hidden information

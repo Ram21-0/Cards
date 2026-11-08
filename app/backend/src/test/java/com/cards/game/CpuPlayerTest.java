@@ -135,10 +135,21 @@ class CpuPlayerTest {
         for (int i = 0; i < 4; i++) opponents.add(card(20 + i, 9, 5));
         List<Card> deck = all(own, opponents);
 
-        assertEquals(0, cpu(CpuStrategy.OPPONENT_PERCENTILE, 0, 1, deck).pickCardForStat(own, POWER, DifficultyLevel.hard, sit(own, 1)),
-                "percentile sees two equal zeros and keeps the first card");
+        Set<Integer> picked = new HashSet<>();
+        CpuPlayer percentile = cpu(CpuStrategy.OPPONENT_PERCENTILE, 0, 1, deck);
+        for (int i = 0; i < 100; i++) picked.add(percentile.pickCardForStat(own, POWER, DifficultyLevel.hard, sit(own, 1)));
+        assertEquals(Set.of(0, 1), picked, "when every card is hopeless the percentile strategies pick at random");
         assertEquals(1, cpu(CpuStrategy.SMART, 0, 1, deck).pickCardForStat(own, POWER, DifficultyLevel.hard, sit(own, 1)),
                 "smart gives away the scrap card");
+    }
+
+    @Test
+    void percentileStillPlaysTheBestCardWhenAnyCardHasAChance() {
+        Card weak = card(1, 1, 5), better = card(2, 6, 5);
+        List<Card> own = List.of(weak, better);
+        List<Card> opponents = List.of(card(20, 5, 5), card(21, 9, 5), card(22, 9, 5));   // 'better' beats one of three, 'weak' none
+        CpuPlayer percentile = cpu(CpuStrategy.OPPONENT_PERCENTILE, 0, 1, all(own, opponents));
+        for (int i = 0; i < 20; i++) assertEquals(1, percentile.pickCardForStat(own, POWER, DifficultyLevel.hard, sit(own, 1)));
     }
 
     @Test

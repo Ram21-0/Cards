@@ -84,6 +84,9 @@ final class CpuPlayer {
         CpuProfile profile = profiles.profile(level);
         if (profile.strategy() == CpuStrategy.RANDOM) return rnd.nextInt(hand.size());
         Set<Integer> own = ownIds(sit);
+        if (profile.strategy() != CpuStrategy.SMART && allHopeless(hand, statIndex, own)) {
+            return rnd.nextInt(hand.size());                  // nothing can win: the percentile strategies have no sacrifice logic, so no card is "least bad"
+        }
         int best = 0;
         double bestScore = Double.NEGATIVE_INFINITY;
         for (int i = 0; i < hand.size(); i++) {
@@ -94,6 +97,14 @@ final class CpuPlayer {
             }
         }
         return best;
+    }
+
+    /** True when no card in the hand can even tie any card the CPU does not hold on this stat. */
+    private boolean allHopeless(List<Card> hand, int statIndex, Set<Integer> own) {
+        for (Card card : hand) {
+            if (pool(card, statIndex, own).beatenOrTied() > 0) return false;
+        }
+        return true;
     }
 
     /** How long a CPU waits before calling in a clash, so humans can win the race: 1.5–4.0 s. */
