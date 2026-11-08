@@ -1,0 +1,15 @@
+# The image only needs app/backend (Maven project) and app/frontend (copied into the jar by -Pbundle-frontend).
+# Everything else in the repo (Android app, Gradle, IDE files, secrets) stays out of the build context.
+*
+!app/backend/pom.xml
+!app/backend/src/**
+!app/frontend/**
+
+# ...and inside what we kept:
+app/frontend/node_modules
+app/frontend/test
+app/frontend/scripts
+**/target
+**/.env
+**/.env.*
+**/.DS_Store
