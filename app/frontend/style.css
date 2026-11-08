@@ -229,3 +229,41 @@ h3.section { font-size: 14px; text-transform: uppercase; letter-spacing: .08em; 
 .hand { display: flex; gap: 12px; overflow-x: auto; padding: 4px 2px 12px; scroll-snap-type: x proximity; }
 .hand .card-wrap { flex: 0 0 min(260px, 72vw); margin: 0; scroll-snap-align: start; }
 .committed { text-align: center; }
+
+/* ===================== playing: call, choose, clash, reveal, feed, game over ===================== */
+.card .grid .hl { background: rgba(0, 0, 0, .14); border-radius: 4px; box-shadow: 0 0 0 1px rgba(0, 0, 0, .35); }
+
+.callpanel, .choosepanel { align-items: stretch; }
+.callpanel .card-wrap { margin: 0 auto; }
+.choose-hand { display: flex; gap: 12px; overflow-x: auto; padding: 6px 2px 10px; scroll-snap-type: x proximity; }
+.choose-card { flex: 0 0 min(230px, 66vw); padding: 0; background: none; border: 3px solid transparent; border-radius: 12px; scroll-snap-align: start; cursor: pointer; transition: transform .1s, border-color .15s; }
+.choose-card:hover:not(:disabled) { border-color: var(--line); }
+.choose-card[aria-pressed="true"] { border-color: var(--accent); transform: translateY(-4px); }
+.choose-card .card { pointer-events: none; }
+
+.table-status .countdown.big { font-size: 40px; line-height: 1; color: var(--loss); }
+.clash-banner { display: flex; flex-direction: column; align-items: center; gap: 2px; animation: clashPulse 1s ease-in-out infinite; }
+.clash-banner b { font-size: 26px; letter-spacing: .06em; color: var(--loss); }
+.clash-banner span { color: var(--muted); font-size: 14px; }
+@keyframes clashPulse { 0%, 100% { opacity: 1; } 50% { opacity: .6; } }
+
+.pill.clash { color: var(--loss); border-color: var(--loss); margin-left: 8px; }
+.last-round h3 { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.last-round .pill { margin-left: 4px; }
+.reveals { display: flex; gap: 12px; overflow-x: auto; padding: 4px 2px 8px; }
+.reveal { margin: 0; flex: 0 0 210px; display: flex; flex-direction: column; gap: 6px; text-align: center; }
+.reveal .card-wrap { width: 100%; margin: 0; }
+.reveal figcaption { font-size: 13px; font-weight: 600; color: var(--muted); }
+.reveal.winner { filter: drop-shadow(0 0 8px rgba(245, 225, 155, .55)); }
+.reveal.winner figcaption { color: var(--accent); }
+.last-round .result { margin: 0; text-align: center; font-weight: 600; }
+.last-round .result.out { color: var(--loss); font-weight: 500; }
+.last-round.fresh .reveal { animation: flipIn .5s ease both; animation-delay: calc(var(--i) * 0.12s); }
+@keyframes flipIn { from { opacity: 0; transform: rotateY(80deg) scale(.9); } to { opacity: 1; transform: none; } }
+
+.feed { list-style: none; margin: 0; padding: 0; display: grid; gap: 4px; color: var(--muted); font-size: 13px; }
+.feed li { padding: 4px 10px; border-left: 2px solid var(--line); }
+.feed li:first-child { color: var(--text); border-left-color: var(--accent); }
+
+.over { align-items: center; text-align: center; }
+.over .result-big { font-size: clamp(34px, 10vw, 52px); }

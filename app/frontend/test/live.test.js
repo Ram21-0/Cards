@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { wsUrl, backoffDelay, skewMs, initialLive, applyMessage, seatName, seatRows, phaseInfo, secondsLeft, createLiveClient, PING_MS } from '../js/live.js';
+import { wsUrl, backoffDelay, skewMs, initialLive, applyMessage, seatName, seatRows, phaseInfo, secondsLeft, createLiveClient, PING_MS,
+  foldRounds, eventText, callCard, clashInfo, ordinal, overFromGame, overSummary } from '../js/live.js';
 
 const game = (over = {}) => ({
   id: 'g1', joinCode: 'K7Q2XM', status: 'WAITING', maxPlayers: 4, deck: { id: 'd', name: 'Wrestling' }, hostSeat: 1,
@@ -208,4 +209,163 @@ test('secondsLeft counts down to a server deadline, corrected for clock skew', (
   assert.equal(secondsLeft('2026-11-08T10:00:05Z', now, 2000), 3);            // our clock is 2 s behind the server
   assert.equal(secondsLeft(null, now), null);
   assert.equal(secondsLeft('junk', now), null);
+});
+
+// ---------------- playing: events, rounds, clash, game over ----------------
+const card = (id, name) => ({ id, name, stats: {} });
+
+test('foldRounds: a normal round from start to win', () => {
+  const evs = [
+    { type: 'roundStarted', round: 3, caller: 1, seats: [1, 2] },
+    { type: 'cardChosen', seat: 2, auto: false },
+    { type: 'statCalled', seat: 1, stat: 'weight', auto: false },
+    { type: 'revealed', cards: { 1: card(4, 'A'), 2: card(9, 'B') } },
+    { type: 'roundWon', seat: 2, cardsWon: 5 },
+  ];
+  const { current, lastRound } = foldRounds({ current: null, lastRound: null }, evs);
+  assert.equal(lastRound.round, 3);
+  assert.equal(lastRound.stat, 'weight');
+  assert.equal(lastRound.winner, 2);
+  assert.equal(lastRound.cardsWon, 5);
+  assert.equal(lastRound.cards[1].name, 'A');
+  assert.equal(current, lastRound);
+});
+
+test('foldRounds: a clash keeps the latest reveal and the clash level, and a CPU-only batch ends on the latest round', () => {
+  const evs = [
+    { type: 'roundStarted', round: 1, caller: 1, seats: [1, 2, 3] },
+    { type: 'statCalled', seat: 1, stat: 'fight', auto: false },
+    { type: 'revealed', cards: { 1: card(1, 'a'), 2: card(2, 'b'), 3: card(3, 'c') } },
+    { type: 'clashStarted', tiedSeats: [1, 2], level: 1, potSize: 3 },
+    { type: 'statCalled', seat: null, stat: 'rank', auto: true },
+    { type: 'revealed', cards: { 1: card(5, 'd'), 2: card(6, 'e') } },
+    { type: 'roundWon', seat: 2, cardsWon: 5 },
+    { type: 'roundStarted', round: 2, caller: 2, seats: [1, 2, 3] },
+  ];
+  const { current, lastRound } = foldRounds({ current: null, lastRound: null }, evs);
+  assert.equal(lastRound.round, 1);
+  assert.equal(lastRound.clash, 1);
+  assert.deepEqual(lastRound.tied, [1, 2]);
+  assert.equal(lastRound.stat, 'rank');            // the tie-break stat
+  assert.equal(lastRound.statAuto, true);
+  assert.deepEqual(Object.keys(lastRound.cards), ['1', '2']);
+  assert.equal(current.round, 2);                  // the next round has started but is not "last" yet
+  assert.equal(current.winner, null);
+});
+
+test('foldRounds: pot carried and eliminations attach to the round they belong to', () => {
+  let st = foldRounds({ current: null, lastRound: null }, [
+    { type: 'roundStarted', round: 7, caller: 1, seats: [1, 2] },
+    { type: 'revealed', cards: { 1: card(1, 'a'), 2: card(2, 'b') } },
+    { type: 'roundWon', seat: 1, cardsWon: 2 },
+    { type: 'playerEliminated', seat: 2, placement: 2 },
+  ]);
+  assert.deepEqual(st.lastRound.eliminated, [{ seat: 2, placement: 2 }]);
+  st = foldRounds(st, [{ type: 'roundStarted', round: 8, caller: 1, seats: [1] }, { type: 'potCarried', potSize: 4 }]);
+  assert.equal(st.lastRound.round, 8);
+  assert.equal(st.lastRound.potCarried, 4);
+  assert.equal(foldRounds({ current: null, lastRound: null }, []).lastRound, null);
+});
+
+test('foldRounds tolerates events that arrive without a roundStarted (e.g. after a reconnect)', () => {
+  const { lastRound } = foldRounds({ current: null, lastRound: null }, [{ type: 'roundWon', seat: 2, cardsWon: 3 }]);
+  assert.equal(lastRound.winner, 2);
+  assert.equal(lastRound.round, null);
+});
+
+test('eventText wording for every event, including auto moves and clashes', () => {
+  const g = game();
+  const label = (k) => ({ weight: 'Weight', rank: 'Rank' })[k] ?? k;
+  assert.equal(eventText({ type: 'roundStarted', round: 2, caller: 1 }, g, label), 'Round 2: ann calls');
+  assert.equal(eventText({ type: 'cardChosen', seat: 2, auto: false }, g), 'CPU (hard) chose a card');
+  assert.equal(eventText({ type: 'cardChosen', seat: 1, auto: true }, g), 'ann chose a card (time ran out)');
+  assert.equal(eventText({ type: 'statCalled', seat: 1, stat: 'weight', auto: false }, g, label), 'ann called Weight');
+  assert.equal(eventText({ type: 'statCalled', seat: 1, stat: 'weight', auto: true }, g, label), 'ann called Weight (time ran out)');
+  assert.equal(eventText({ type: 'statCalled', seat: null, stat: 'rank', auto: true }, g, label), 'Nobody called in time: Rank was picked at random');
+  assert.equal(eventText({ type: 'roundWon', seat: 2, cardsWon: 1 }, g), 'CPU (hard) won the round and takes 1 card');
+  assert.equal(eventText({ type: 'roundWon', seat: 1, cardsWon: 5 }, g), 'ann won the round and takes 5 cards');
+  assert.equal(eventText({ type: 'clashStarted', tiedSeats: [1, 2], level: 2, potSize: 6 }, g), 'CLASH ×2: ann and CPU (hard) tied (pot 6)');
+  assert.equal(eventText({ type: 'potCarried', potSize: 4 }, g), 'Nobody could settle the tie: the pot (4) carries over');
+  assert.equal(eventText({ type: 'playerEliminated', seat: 2, placement: 2 }, g), 'CPU (hard) is out (#2)');
+  assert.equal(eventText({ type: 'gameOver', endedByRoundCap: true }, g), 'Round cap reached: game over');
+  assert.equal(eventText({ type: 'nonsense' }, g), '');
+});
+
+test('applyMessage: events build the feed (capped) and the last round; gameOver stores the result', () => {
+  let s = initialLive();
+  s = applyMessage(s, { type: 'lobby', mySeat: 1, game: game({ status: 'IN_PROGRESS' }) });
+  s = applyMessage(s, { type: 'events', events: [{ type: 'roundStarted', round: 1, caller: 1, seats: [1, 2] }, { type: 'statCalled', seat: 1, stat: 'rank', auto: false }, { type: 'roundWon', seat: 1, cardsWon: 2 }] });
+  assert.equal(s.feed.length, 3);
+  assert.equal(s.lastRound.winner, 1);
+  for (let i = 0; i < 20; i++) s = applyMessage(s, { type: 'events', events: [{ type: 'cardChosen', seat: 2, auto: false }] });
+  assert.equal(s.feed.length, 12);                     // capped, newest kept
+  s = applyMessage(s, { type: 'gameOver', mySeat: 1, placements: { 1: 1, 2: 2 }, endedByRoundCap: true, game: game({ status: 'FINISHED' }) });
+  assert.deepEqual(s.over, { placements: { 1: 1, 2: 2 }, endedByRoundCap: true });
+  assert.equal(s.game.status, 'FINISHED');
+});
+
+test('applyMessage: an older view (a slow REST answer) never replaces a newer one', () => {
+  let s = applyMessage(initialLive(), { type: 'view', serverTime: '2026-11-08T10:00:05Z', round: 2 });
+  s = applyMessage(s, { type: 'view', serverTime: '2026-11-08T10:00:01Z', round: 1 });
+  assert.equal(s.view.round, 2);
+  s = applyMessage(s, { type: 'view', serverTime: '2026-11-08T10:00:05Z', round: 2, phase: 'X' });   // same time: accepted
+  assert.equal(s.view.phase, 'X');
+  s = applyMessage(s, { type: 'view', serverTime: '2026-11-08T10:00:09Z', round: 3 });
+  assert.equal(s.view.round, 3);
+});
+
+test('applyMessage: reconnecting to a finished game gets the result from the seat placements', () => {
+  const finished = game({ status: 'FINISHED', seats: [{ seat: 1, kind: 'HUMAN', username: 'ann', placement: 2 }, { seat: 2, kind: 'HUMAN', username: 'bob', placement: 1 }] });
+  const s = applyMessage(initialLive(), { type: 'lobby', mySeat: 1, game: finished });
+  assert.deepEqual(s.over.placements, { 1: 2, 2: 1 });
+});
+
+test('callCard prefers the committed card, then the top card', () => {
+  assert.equal(callCard({ committed: card(5, 'c'), ownHand: [card(1, 'a')] }).id, 5);
+  assert.equal(callCard({ committed: null, ownHand: [card(1, 'a'), card(2, 'b')] }).id, 1);
+  assert.equal(callCard({ committed: null, ownHand: [] }), null);
+  assert.equal(callCard(null), null);
+});
+
+test('clashInfo: who is in the clash and whether I can race', () => {
+  const g = game();
+  const none = clashInfo({ view: { phase: 'AWAIT_CALL', clashLevel: 0, contenders: [1, 2] }, game: g, mySeat: 1 });
+  assert.equal(none.active, false);
+  assert.deepEqual(none.seats, []);
+  const c = clashInfo({ view: { phase: 'CLASH_AWAIT_CALL', clashLevel: 2, contenders: [1, 2], canCall: true }, game: g, mySeat: 1 });
+  assert.equal(c.active, true);
+  assert.equal(c.level, 2);
+  assert.deepEqual(c.names, ['ann', 'CPU (hard)']);
+  assert.equal(c.iAmContender, true);
+  assert.equal(c.canRace, true);
+  assert.equal(clashInfo({ view: { phase: 'CLASH_AWAIT_CHOOSE', clashLevel: 1, contenders: [2, 3] }, game: g, mySeat: 1 }).iAmContender, false);
+  assert.equal(clashInfo({ view: null, game: g, mySeat: 1 }).active, false);
+});
+
+test('phaseInfo: clash wording depends on whether I can race', () => {
+  const g = game();
+  const base = { phase: 'CLASH_AWAIT_CALL', callerSeat: 1, clashLevel: 1 };
+  assert.match(phaseInfo({ view: { ...base, canCall: true }, game: g, mySeat: 1 }).text, /Call a stat now/);
+  assert.match(phaseInfo({ view: { ...base, canCall: false }, game: g, mySeat: 1 }).text, /Waiting for a stat/);
+});
+
+test('ordinal', () => {
+  assert.deepEqual([1, 2, 3, 4, 11, 12, 13, 21, 22, 101, 111].map(ordinal), ['1st', '2nd', '3rd', '4th', '11th', '12th', '13th', '21st', '22nd', '101st', '111th']);
+});
+
+test('overSummary: winner, runner-up, shared first place, and sorted rows', () => {
+  const g = game({ seats: [{ seat: 1, kind: 'HUMAN', username: 'ann' }, { seat: 2, kind: 'CPU', difficulty: 'EASY' }, { seat: 3, kind: 'HUMAN', username: 'cy' }] });
+  const won = overSummary({ over: { placements: { 1: 1, 2: 2, 3: 3 }, endedByRoundCap: false }, game: g, mySeat: 1 });
+  assert.equal(won.title, 'You won!');
+  assert.equal(won.won, true);
+  assert.deepEqual(won.rows.map((r) => r.name), ['ann', 'CPU (easy)', 'cy']);
+  const third = overSummary({ over: { placements: { 1: 1, 2: 2, 3: 3 } }, game: g, mySeat: 3 });
+  assert.equal(third.title, 'You finished 3rd');
+  assert.equal(third.rows.at(-1).isMe, true);
+  const tie = overSummary({ over: { placements: { 1: 1, 2: 2, 3: 1 }, endedByRoundCap: true }, game: g, mySeat: 3 });
+  assert.equal(tie.title, 'You tied for 1st!');
+  assert.equal(tie.endedByRoundCap, true);
+  assert.deepEqual(tie.rows.map((r) => r.seat), [1, 3, 2]);                // shared 1st by seat, then 2nd
+  assert.equal(overSummary({ over: { placements: {} }, game: g, mySeat: 1 }).title, 'Game over');   // placements unknown
+  assert.equal(overFromGame(g).placements[1], undefined);
 });

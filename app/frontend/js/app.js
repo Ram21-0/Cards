@@ -1,8 +1,11 @@
 import { Game, RESULT, DIFFICULTY } from './engine.js';
-import { wsUrl, createLiveClient, initialLive, applyMessage, seatName, seatRows, phaseInfo, secondsLeft } from './live.js';
+import {
+  wsUrl, createLiveClient, initialLive, applyMessage, seatName, seatRows, phaseInfo, secondsLeft,
+  eventText, callCard, clashInfo, overSummary, overFromGame, ordinal,
+} from './live.js';
 import { parseRoute, toHash, paths, backDecision, needsUnloadGuard, redirectFor, upAction } from './nav.js';
 import {
-  API_BASE, ApiError, fetchDecks, fetchDeck, createGame, getGame, joinGame, addCpu, removeSeat, leaveLobby, startLiveGame, fetchDeckStats, mapCard,
+  API_BASE, ApiError, fetchDecks, fetchDeck, createGame, getGame, joinGame, addCpu, removeSeat, leaveLobby, startLiveGame, fetchDeckStats, mapCard, callStat, chooseCard,
   fetchNonce, googleSignIn, fetchMe, updateMe, signOut, deleteAccount, devLogin,
 } from './api.js';
 import { offlineDeck } from './offline.js';
@@ -47,15 +50,16 @@ function toast(msg) {
 }
 
 /* ---------- card (layout/card.xml) ---------- */
-function cardView(w, d = deck) {
+/** `opts.highlight`: a stat key to mark (the stat in play). */
+function cardView(w, d = deck, opts = {}) {
   const img = el('img', { src: w.img || PLACEHOLDER, alt: w.name, draggable: 'false' });
   img.addEventListener('error', () => { img.src = PLACEHOLDER; }, { once: true });
   return el('article', { class: `card ${w.brand === 'sd' ? 'sd' : 'raw'}` },
     el('div', { class: 'image' }, img),
     el('h2', { class: 'name' }, w.name),
     el('div', { class: 'grid', style: `--cols:${d.stats.length}` },
-      d.stats.map((s) => el('span', { class: 'label' }, s.label)),
-      d.stats.map((s) => el('span', { class: 'value' }, w.stats[s.key].display))));
+      d.stats.map((s) => el('span', { class: `label${opts.highlight === s.key ? ' hl' : ''}` }, s.label)),
+      d.stats.map((s) => el('span', { class: `value${opts.highlight === s.key ? ' hl' : ''}` }, w.stats[s.key]?.display ?? '–'))));
 }
 
 /* ---------- boot ---------- */
@@ -473,7 +477,7 @@ function lobby(g) {
   closeLive();
   const ctx = {
     code: g.joinCode, game: g, mySeat: seatOfMe(g), view: null, rt: initialLive(), conn: 'idle', deck: null,
-    level: store('cpuLevel') || 'medium', busy: false, client: null, ticker: null,
+    level: store('cpuLevel') || 'medium', busy: false, pending: false, pick: null, client: null, ticker: null,
   };
   live = ctx;
   const root = screen('');
@@ -502,6 +506,11 @@ function setGame(ctx, g) {
     toast('This game was closed');
     closeLive();
     return goUp(paths.decks());
+  }
+  if (g.status === 'FINISHED' && ctx.client) {                  // nothing more will be pushed
+    ctx.client.close();
+    ctx.client = null;
+    ctx.conn = 'idle';
   }
   if (ctx.mySeat != null && !ctx.client && ['WAITING', 'IN_PROGRESS'].includes(g.status)) startSocket(ctx);
   if (inTable(g) && !ctx.deck) {
@@ -547,7 +556,16 @@ function onLiveMessage(ctx, msg) {
   if (live !== ctx) return;
   const had = ctx.mySeat != null;
   ctx.rt = applyMessage(ctx.rt, msg, Date.now());
-  if (msg.type === 'view') { ctx.view = ctx.rt.view; return ctx.paint(); }
+  if (msg.type === 'view') {
+    ctx.view = ctx.rt.view;
+    if (ctx.pick != null && !(ctx.view.canChoose && ctx.view.ownHand.some((c) => c.id === ctx.pick))) ctx.pick = null;   // the choice is over
+    return ctx.paint();
+  }
+  if (msg.type === 'events') return ctx.paint();
+  if (msg.type === 'gameOver') {
+    ctx.mySeat = ctx.rt.mySeat;
+    return setGame(ctx, ctx.rt.game);
+  }
   if (msg.type !== 'lobby' && msg.type !== 'started') return;
   if (ctx.rt.mySeat == null && had) {                          // we were taken off the seat list
     toast('You are no longer in this game');
@@ -680,22 +698,149 @@ function handTitle(v, mySeat) {
   return visible >= total ? `Your hand · ${v.ownHand.length}` : `Your top card · ${total} in your pile`;
 }
 
-/** The table once the game has started: who is where, whose call it is, and your own hand. */
+/** Runs a move (call a stat / choose a card): one at a time; the server's answer is our new view, refusals are explained. */
+async function play(ctx, fn) {
+  if (ctx.pending || live !== ctx) return;
+  ctx.pending = true;
+  ctx.paint();
+  try {
+    const v = await fn();
+    if (live === ctx) {
+      ctx.rt = applyMessage(ctx.rt, { ...v, type: 'view' }, Date.now());   // an older push never wins over a newer view
+      ctx.view = ctx.rt.view;
+      ctx.pick = null;
+    }
+  } catch (e) {
+    if (live !== ctx) return;
+    if (e instanceof ApiError && e.status === 401) {
+      me = null;
+      toast('Your session expired — sign in again');
+      closeLive();
+      return signIn(paths.lobby(ctx.code));
+    }
+    toast(e instanceof ApiError ? e.message : 'Could not reach the server');   // e.g. "too late: the stat was already set"
+  } finally {
+    if (live === ctx) { ctx.pending = false; ctx.paint(); }
+  }
+}
+
+const statLabelOf = (ctx) => (key) => ctx.deck?.stats.find((s) => s.key === key)?.label ?? key;
+
+/** Your turn to call: your card, and one button per stat showing its value. In a clash the first call wins. */
+function callPanel(ctx, clash) {
+  const v = ctx.view;
+  const c = callCard(v);
+  if (!c || !ctx.deck) return '';
+  const card = mapCard(c, ctx.deck.stats);
+  return el('section', { class: 'panel callpanel' },
+    el('h3', {}, clash ? 'Race: call a stat first!' : 'Your turn: call a stat'),
+    el('div', { class: 'card-wrap' }, cardView(card, ctx.deck)),
+    el('div', { class: 'stat-grid' }, ctx.deck.stats.map((s) =>
+      el('button', { class: 'stat-btn', disabled: ctx.pending, onclick: () => play(ctx, () => callStat(ctx.code, s.key)) },
+        el('span', {}, s.label), el('b', {}, card.stats[s.key]?.display ?? '–')))));
+}
+
+/** CHOOSE: you may put any card from your hand in play. Tap a card, then confirm; or just play your top card. */
+function choosePanel(ctx) {
+  const v = ctx.view;
+  if (!ctx.deck) return '';
+  const hand = v.ownHand.map((c) => mapCard(c, ctx.deck.stats));
+  const stat = v.stat ? statLabelOf(ctx)(v.stat) : null;
+  const picked = hand.find((c) => c.id === ctx.pick);
+  return el('section', { class: 'panel choosepanel' },
+    el('h3', {}, stat ? `Choose a card to play · ${stat}` : 'Choose a card to play'),
+    el('p', { class: 'hint' }, stat ? `The stat is ${stat}: pick the card that does best.` : 'The stat is not known yet. Pick a card, then you call the stat.'),
+    el('div', { class: 'choose-hand' }, hand.map((c) =>
+      el('button', { class: 'choose-card', 'aria-pressed': String(c.id === ctx.pick), 'aria-label': `Play ${c.name}`, disabled: ctx.pending,
+        onclick: () => { ctx.pick = c.id; ctx.paint(); } }, cardView(c, ctx.deck, { highlight: v.stat })))),
+    el('div', { class: 'btn-row' },
+      el('button', { class: 'btn primary', disabled: !picked || ctx.pending, onclick: () => play(ctx, () => chooseCard(ctx.code, picked.id)) }, picked ? `Play ${picked.name}` : 'Pick a card'),
+      el('button', { class: 'btn', disabled: ctx.pending || !hand.length, onclick: () => play(ctx, () => chooseCard(ctx.code, hand[0].id)) }, 'Play top card')));
+}
+
+/** The cards that were just revealed and who won them. Built once per finished round, so its animation is not replayed by later repaints. */
+function lastRoundPanel(ctx) {
+  const lr = ctx.rt.lastRound;
+  if (!lr || !ctx.deck) return '';
+  if (ctx.lrSrc !== lr || ctx.lrDeck !== ctx.deck) {
+    ctx.lrSrc = lr;
+    ctx.lrDeck = ctx.deck;
+    ctx.lrNode = buildLastRound(ctx, lr);
+  }
+  return ctx.lrNode;
+}
+
+function buildLastRound(ctx, lr) {
+  const g = ctx.game;
+  const label = statLabelOf(ctx);
+  const cards = Object.entries(lr.cards ?? {});
+  return el('section', { class: 'panel last-round fresh' },
+    el('h3', {}, `Last round${lr.round ? ` · ${lr.round}` : ''}`,
+      lr.stat ? el('span', { class: 'pill' }, `${label(lr.stat)}${lr.statAuto ? ' (auto)' : ''}`) : '',
+      lr.clash ? el('span', { class: 'pill clash' }, `CLASH${lr.clash > 1 ? ` ×${lr.clash}` : ''}`) : ''),
+    cards.length ? el('div', { class: 'reveals' }, cards.map(([seat, c], i) => {
+      const win = Number(seat) === lr.winner;
+      return el('figure', { class: `reveal${win ? ' winner' : ''}`, style: `--i:${i}` },
+        el('div', { class: 'card-wrap' }, cardView(mapCard(c, ctx.deck.stats), ctx.deck, { highlight: lr.stat })),
+        el('figcaption', {}, seatName(g, Number(seat)), win ? ' 🏆' : ''));
+    })) : '',
+    el('p', { class: 'result' },
+      lr.winner != null ? `${seatName(g, lr.winner)} won the round and takes ${lr.cardsWon} card${lr.cardsWon === 1 ? '' : 's'}`
+        : lr.potCarried != null ? `No winner: the pot (${lr.potCarried}) carries over` : ''),
+    ...lr.eliminated.map((e) => el('p', { class: 'result out' }, `${seatName(g, e.seat)} is out (#${e.placement})`)));
+}
+
+/** The last few things that happened, newest first. */
+function feedList(ctx) {
+  const g = ctx.game;
+  const lines = ctx.rt.feed.filter((e) => e.type !== 'revealed' && e.type !== 'gameOver')
+    .map((e) => eventText(e, g, statLabelOf(ctx))).filter(Boolean).slice(-6).reverse();
+  return lines.length ? el('ol', { class: 'feed', 'aria-label': 'Recent events' }, lines.map((t) => el('li', {}, t))) : '';
+}
+
+/** The result, once the game has ended. */
+function overScreen(ctx) {
+  const g = ctx.game;
+  const sum = overSummary({ over: ctx.rt.over ?? overFromGame(g), game: g, mySeat: ctx.mySeat });
+  return [
+    el('div', { class: 'topbar' }, el('button', { class: 'btn small', onclick: () => goUp(paths.decks()) }, '← Decks'), el('h2', {}, g.deck.name), el('span')),
+    el('section', { class: 'panel over' },
+      el('h1', { class: `result-big ${sum.won ? 'won' : ''}` }, sum.title),
+      sum.endedByRoundCap ? el('p', { class: 'hint' }, 'The round limit ended the game: the player with the most cards wins.') : ''),
+    el('ol', { class: 'table' }, sum.rows.map((r) =>
+      el('li', { class: r.isMe ? 'mine' : '' },
+        el('span', { class: 'seat-no' }, r.placement != null ? String(r.placement) : '–'),
+        el('span', { class: 'seat-name' }, r.name, r.isMe ? el('em', {}, ' · you') : ''),
+        el('span', { class: 'pill' }, r.placement != null ? ordinal(r.placement) : '')))),
+    lastRoundPanel(ctx),
+    el('div', { class: 'btn-col' },
+      el('button', { class: 'btn primary', onclick: () => nav(paths.deck(g.deck.id)) }, 'New game with this deck'),
+      el('button', { class: 'btn', onclick: () => goUp(paths.decks()) }, 'Back to decks')),
+  ];
+}
+
+/** The table while the game runs: status, your move, who is where, what just happened. */
 function liveScreen(ctx) {
   const g = ctx.game;
+  if (g.status === 'FINISHED') return overScreen(ctx);
   const v = ctx.view;
-  const statLabel = ctx.deck?.stats.find((s) => s.key === v?.stat)?.label;
-  const info = phaseInfo({ view: v, game: g, mySeat: ctx.mySeat, statLabel });
+  const label = statLabelOf(ctx);
+  const info = phaseInfo({ view: v, game: g, mySeat: ctx.mySeat, statLabel: v?.stat ? label(v.stat) : undefined });
+  const clash = clashInfo({ view: v, game: g, mySeat: ctx.mySeat });
   const rows = seatRows(g, v, ctx.mySeat);
   const left = secondsLeft(v?.deadline, Date.now(), ctx.rt.skewMs);
-  const hand = ctx.deck && v ? v.ownHand.map((c) => mapCard(c, ctx.deck.stats)) : [];
-  const committed = ctx.deck && v?.committed ? mapCard(v.committed, ctx.deck.stats) : null;
+  const mine = v && ctx.deck && !v.canChoose && !v.canCall;                // nothing to do: just show your card(s)
+  const hand = mine ? v.ownHand.map((c) => mapCard(c, ctx.deck.stats)) : [];
+  const committed = mine && v.committed ? mapCard(v.committed, ctx.deck.stats) : null;
 
   return [
     el('div', { class: 'topbar' }, el('button', { class: 'btn small ghost', onclick: () => (isSeated() ? askLeave() : goUp(paths.decks())) }, '✕ Leave'), el('h2', {}, g.deck.name), connChip(ctx)),
     el('section', { class: `panel table-status${info.clash ? ' clash' : ''}`, role: 'status' },
-      v ? el('div', { class: 'status-meta' }, el('b', {}, `Round ${v.round}`), v.potSize > 0 ? el('span', { class: 'pill' }, `Pot · ${v.potSize}`) : '', el('span', { class: 'countdown' }, left == null ? '' : `${left}s`)) : '',
+      clash.active ? el('div', { class: 'clash-banner' }, el('b', {}, `⚔ CLASH${clash.level > 1 ? ` ×${clash.level}` : ''}`), el('span', {}, clash.names.length ? `${clash.names.join(' vs ')}${v.potSize ? ` · pot ${v.potSize}` : ''}` : '')) : '',
+      v ? el('div', { class: 'status-meta' }, el('b', {}, `Round ${v.round}`), !clash.active && v.potSize > 0 ? el('span', { class: 'pill' }, `Pot · ${v.potSize}`) : '', el('span', { class: `countdown${clash.active ? ' big' : ''}` }, left == null ? '' : `${left}s`)) : '',
       el('p', { class: 'status' }, info.text)),
+    v && v.canChoose ? choosePanel(ctx) : '',
+    v && v.canCall ? callPanel(ctx, clash.active) : '',
     el('ol', { class: 'table' }, rows.map((r) =>
       el('li', { class: `${r.isMe ? 'mine' : ''}${r.out ? ' out' : ''}${r.isCaller ? ' caller' : ''}${r.isContender ? ' contender' : ''}` },
         el('span', { class: 'seat-no' }, String(r.seat)),
@@ -703,11 +848,13 @@ function liveScreen(ctx) {
         r.isCaller && !r.out ? el('span', { class: 'tag' }, 'calls') : '',
         r.isContender ? el('span', { class: 'tag clash' }, 'clash') : '',
         r.placement != null ? el('span', { class: 'tag' }, `#${r.placement}`) : '',
-        el('span', { class: 'pill' }, r.handSize == null ? '–' : r.out ? 'out' : `${r.handSize} cards`)))),
-    v ? el('h3', { class: 'section' }, handTitle(v, ctx.mySeat)) : '',
-    committed ? el('div', { class: 'card-wrap committed' }, el('p', { class: 'hint' }, 'Played this round'), cardView(committed, ctx.deck)) : '',
-    hand.length ? el('div', { class: 'hand' }, hand.map((c) => el('div', { class: 'card-wrap' }, cardView(c, ctx.deck)))) : (v ? el('p', { class: 'hint' }, ctx.deck ? 'You have no cards in hand.' : 'Loading your cards…') : ''),
-    el('p', { class: 'hint' }, 'The table is live. Calling a stat and choosing cards are being added next.'),
+        el('span', { class: 'pill' }, r.handSize == null ? '–' : r.out ? 'out' : `${r.handSize} card${r.handSize === 1 ? '' : 's'}`)))),
+    lastRoundPanel(ctx),
+    mine ? el('h3', { class: 'section' }, handTitle(v, ctx.mySeat)) : '',
+    committed ? el('div', { class: 'card-wrap committed' }, el('p', { class: 'hint' }, 'Played this round'), cardView(committed, ctx.deck, { highlight: v.stat })) : '',
+    hand.length ? el('div', { class: 'hand' }, hand.map((c) => el('div', { class: 'card-wrap' }, cardView(c, ctx.deck, { highlight: v.stat })))) : '',
+    v && !ctx.deck ? el('p', { class: 'hint' }, 'Loading your cards…') : '',
+    feedList(ctx),
   ];
 }
 

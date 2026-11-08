@@ -25,7 +25,15 @@ export const skewMs = (serverTime, nowMs) => {
   return Number.isNaN(t) ? 0 : t - nowMs;
 };
 
-export const initialLive = () => ({ game: null, mySeat: null, view: null, skewMs: 0, started: false, lastError: null });
+export const initialLive = () => ({
+  game: null, mySeat: null, view: null, skewMs: 0, started: false, lastError: null,
+  feed: [],            // the most recent game events (raw), newest last
+  current: null,       // the round being played, folded from events
+  lastRound: null,     // the last finished round (what to show on the table)
+  over: null,          // { placements, endedByRoundCap } once the game has ended
+});
+
+const FEED_MAX = 12;
 
 /** Folds one server message into the client state. Pure: returns a new state. */
 export function applyMessage(state, msg, nowMs = Date.now()) {
@@ -38,9 +46,26 @@ export function applyMessage(state, msg, nowMs = Date.now()) {
       next.mySeat = msg.mySeat ?? null;
       if (msg.type === 'started') next.started = true;
       if (msg.game?.status === 'WAITING') next.view = null;     // no table before the start
+      if (msg.game?.status === 'FINISHED' && !next.over) next.over = overFromGame(msg.game);
       break;
-    case 'view':
-      next.view = msg;
+    case 'view': {
+      // A REST answer can arrive after a newer push: never let an older view replace a newer one.
+      const older = state.view?.serverTime && msg.serverTime && Date.parse(msg.serverTime) < Date.parse(state.view.serverTime);
+      if (!older) next.view = msg;
+      break;
+    }
+    case 'events': {
+      const events = msg.events ?? [];
+      next.feed = [...state.feed, ...events].slice(-FEED_MAX);
+      const folded = foldRounds({ current: state.current, lastRound: state.lastRound }, events);
+      next.current = folded.current;
+      next.lastRound = folded.lastRound;
+      break;
+    }
+    case 'gameOver':
+      next.over = { placements: msg.placements ?? {}, endedByRoundCap: Boolean(msg.endedByRoundCap) };
+      next.game = msg.game ?? state.game;
+      next.mySeat = msg.mySeat ?? state.mySeat;
       break;
     case 'error':
       next.lastError = msg.error ?? 'Unknown error';
@@ -91,7 +116,7 @@ export function phaseInfo({ view, game, mySeat, statLabel }) {
     case 'AWAIT_CHOOSE_OTHERS':
       return { text: view.canChoose ? `Stat called${called}: choose your card` : `Players are choosing their cards${called}`, clash: false };
     case 'CLASH_AWAIT_CALL':
-      return { text: `CLASH!${view.clashLevel > 1 ? ` ×${view.clashLevel}` : ''} The first call decides the stat`, clash: true };
+      return { text: `CLASH!${view.clashLevel > 1 ? ` ×${view.clashLevel}` : ''} ${view.canCall ? 'Call a stat now: the first call wins' : 'Waiting for a stat to be called'}`, clash: true };
     case 'CLASH_AWAIT_CHOOSE':
       return { text: `CLASH!${called} Choose your card`, clash: true };
     case 'RESOLVE':
@@ -178,4 +203,107 @@ export function secondsLeft(deadline, nowMs, offsetMs = 0) {
   if (!deadline) return null;
   const t = Date.parse(deadline);
   return Number.isNaN(t) ? null : Math.max(0, Math.ceil((t - (nowMs + offsetMs)) / 1000));
+}
+
+// ---------------- events -> text and "what happened last round" ----------------
+
+/** Folds game events (in order) into the round being played and the last finished round. Pure. */
+export function foldRounds({ current, lastRound }, events) {
+  let cur = current;
+  let last = lastRound;
+  const fresh = (round, caller) => ({ round, caller, stat: null, statSeat: null, statAuto: false, cards: null, clash: 0, tied: null,
+    winner: null, cardsWon: 0, potCarried: null, eliminated: [] });
+  for (const ev of events ?? []) {
+    switch (ev.type) {
+      case 'roundStarted':
+        cur = fresh(ev.round, ev.caller);
+        break;
+      case 'statCalled':
+        cur ??= fresh(null, null);
+        cur = { ...cur, stat: ev.stat, statSeat: ev.seat, statAuto: Boolean(ev.auto) };
+        break;
+      case 'clashStarted':
+        cur ??= fresh(null, null);
+        cur = { ...cur, clash: ev.level, tied: ev.tiedSeats };
+        break;
+      case 'revealed':
+        cur ??= fresh(null, null);
+        cur = { ...cur, cards: ev.cards };                         // in a clash this is the latest reveal
+        break;
+      case 'roundWon':
+        cur ??= fresh(null, null);
+        cur = { ...cur, winner: ev.seat, cardsWon: ev.cardsWon };
+        last = cur;
+        break;
+      case 'potCarried':
+        cur ??= fresh(null, null);
+        cur = { ...cur, potCarried: ev.potSize };
+        last = cur;
+        break;
+      case 'playerEliminated':
+        cur ??= fresh(null, null);
+        cur = { ...cur, eliminated: [...cur.eliminated, { seat: ev.seat, placement: ev.placement }] };
+        if (last && last.round === cur.round) last = cur;          // elimination is reported right after the win
+        break;
+      default:                                                     // cardChosen, gameOver: nothing to fold
+    }
+  }
+  return { current: cur, lastRound: last };
+}
+
+/** One line per event for the feed. `statLabel(key)` turns a stat key into its label. */
+export function eventText(ev, game, statLabel = (k) => k) {
+  const name = (seat) => seatName(game, seat);
+  const auto = ev.auto ? ' (time ran out)' : '';
+  switch (ev.type) {
+    case 'roundStarted': return `Round ${ev.round}: ${name(ev.caller)} calls`;
+    case 'cardChosen': return `${name(ev.seat)} chose a card${auto}`;
+    case 'statCalled': return ev.seat == null
+      ? `Nobody called in time: ${statLabel(ev.stat)} was picked at random`
+      : `${name(ev.seat)} called ${statLabel(ev.stat)}${auto}`;
+    case 'revealed': return 'Cards revealed';
+    case 'roundWon': return `${name(ev.seat)} won the round and takes ${ev.cardsWon} card${ev.cardsWon === 1 ? '' : 's'}`;
+    case 'clashStarted': return `CLASH${ev.level > 1 ? ` ×${ev.level}` : ''}: ${(ev.tiedSeats ?? []).map(name).join(' and ')} tied (pot ${ev.potSize})`;
+    case 'potCarried': return `Nobody could settle the tie: the pot (${ev.potSize}) carries over`;
+    case 'playerEliminated': return `${name(ev.seat)} is out (#${ev.placement})`;
+    case 'gameOver': return ev.endedByRoundCap ? 'Round cap reached: game over' : 'Game over';
+    default: return '';
+  }
+}
+
+/** The card a player is calling a stat from: the one they committed, else their top card. */
+export const callCard = (view) => view?.committed ?? view?.ownHand?.[0] ?? null;
+
+/** Is there a clash on, who is in it, and may I race to call? */
+export function clashInfo({ view, game, mySeat }) {
+  const active = Boolean(view) && (view.clashLevel > 0 || String(view.phase ?? '').startsWith('CLASH'));
+  const seats = active ? (view.contenders ?? []) : [];
+  return { active, level: view?.clashLevel ?? 0, seats, names: seats.map((s) => seatName(game, s)), iAmContender: seats.includes(mySeat), canRace: Boolean(view?.canCall) };
+}
+
+export function ordinal(n) {
+  const v = n % 100;
+  if (v >= 11 && v <= 13) return `${n}th`;
+  return `${n}${({ 1: 'st', 2: 'nd', 3: 'rd' })[n % 10] ?? 'th'}`;
+}
+
+/** Placements from a finished game body (seat.placement), for a reconnect after the game ended. */
+export function overFromGame(game) {
+  const placements = {};
+  for (const s of game?.seats ?? []) if (s.placement != null) placements[s.seat] = s.placement;
+  return { placements, endedByRoundCap: false };
+}
+
+/** Everything the game-over screen shows. */
+export function overSummary({ over, game, mySeat }) {
+  const placements = over?.placements ?? {};
+  const rows = (game?.seats ?? [])
+    .map((s) => ({ seat: s.seat, name: seatName(game, s.seat), isMe: s.seat === mySeat, placement: placements[s.seat] ?? placements[String(s.seat)] ?? null }))
+    .sort((a, b) => (a.placement ?? 99) - (b.placement ?? 99) || a.seat - b.seat);
+  const mine = rows.find((r) => r.isMe)?.placement ?? null;
+  const winners = rows.filter((r) => r.placement === 1).length;
+  const title = mine == null ? 'Game over'
+    : mine === 1 ? (winners > 1 ? 'You tied for 1st!' : 'You won!')
+    : `You finished ${ordinal(mine)}`;
+  return { title, rows, won: mine === 1, endedByRoundCap: Boolean(over?.endedByRoundCap) };
 }

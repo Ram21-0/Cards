@@ -31,7 +31,12 @@ Contract: `app/backend/LIVE.md`. The lobby and the table are the same screen, `#
 - **Table (IN_PROGRESS).** Round, phase text (who calls, CLASH, choosing), pot, a countdown when the server sets a deadline, every seat's hand size (opponents' cards are never sent), and your own hand as cards
   (you see the whole hand only when CHOOSE lets you play any card, otherwise your top card). Reloading rejoins: the server sends the lobby and your view again.
 - **Connection handling:** back-off reconnects (0.5 s … 30 s, jittered), a ping every 25 s, and no retry loop when the server refuses for good: signed out → straight to sign-in and back to the table; not seated / game gone → "Offline" with the reason.
-- **Not built yet (backend stage 2):** calling a stat, choosing a card, events and the game-over screen. The table is read-only until then.
+- **Playing** (all moves are REST calls, `POST /api/games/{code}/call` and `/choose`; the answer is your new `view`, and an older push never overwrites a newer view):
+  - **Your turn:** your card plus one button per stat showing its value. In a **clash** every tied player may race: the banner shows ⚔ CLASH ×N, who is tied, and a big countdown; the first call wins.
+  - **CHOOSE** (few cards left): tap any card in your hand and confirm, or "Play top card"; the stat in play is highlighted on every card.
+  - **What just happened:** the server's `events` feed a *Last round* panel (the revealed cards with the stat highlighted, the winner, cards won, eliminations) and a short feed of recent events. Moves made by the clock or for an absent player are marked "(time ran out)" / "(auto)".
+  - **Game over:** the result ("You won!", "You finished 2nd"), the ranking, and "New game with this deck". Reopening a finished game shows the ranking from the server (no socket).
+  - Refused moves (not your turn, too late in a clash race…) show the server's message and leave the panel usable. Pure logic (`foldRounds`, `eventText`, `clashInfo`, `overSummary`, stale-view guard) is in `js/live.js` with tests.
 
 ## Navigation, the Back button and leaving a game
 Screens are hash routes (`js/nav.js`, wired up in `js/app.js`), so the browser Back/Forward buttons and the phone's Back gesture move between screens

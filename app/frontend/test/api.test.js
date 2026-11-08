@@ -190,3 +190,29 @@ test('an empty apiBase (bundled build) means same origin: paths stay relative', 
   assert.equal(calls[0].url, '/api/games/ABC234');
   globalThis.CARDS_CONFIG = saved;
 });
+
+test('callStat and chooseCard POST to /call and /choose with the right bodies and return the view', async () => {
+  const { callStat, chooseCard } = await import('../js/api.js');
+  let calls = mockFetch(200, { type: 'view', phase: 'AWAIT_CHOOSE_OTHERS' });
+  assert.equal((await callStat('k7q2xm', 'weight')).phase, 'AWAIT_CHOOSE_OTHERS');
+  assert.match(calls[0].url, /\/api\/games\/k7q2xm\/call$/);
+  assert.equal(calls[0].init.method, 'POST');
+  assert.deepEqual(JSON.parse(calls[0].init.body), { stat: 'weight' });
+  assert.equal(calls[0].init.credentials, 'include');
+  assert.equal(calls[0].init.headers['X-Requested-With'], 'cards');
+
+  calls = mockFetch(200, { type: 'view' });
+  await chooseCard('K7Q2XM', 17);
+  assert.match(calls[0].url, /\/api\/games\/K7Q2XM\/choose$/);
+  assert.deepEqual(JSON.parse(calls[0].init.body), { cardId: 17 });
+});
+
+test('play errors keep the server message and status (not your turn / wrong phase / bad card)', async () => {
+  const { callStat, chooseCard } = await import('../js/api.js');
+  for (const [status, error] of [[403, 'It is not your turn'], [409, 'The stat was already set'], [400, 'Unknown stat']]) {
+    mockFetch(status, { error });
+    await assert.rejects(() => callStat('ABC123', 'x'), (e) => e instanceof ApiError && e.status === status && e.message === error);
+  }
+  mockFetch(400, { error: 'That card is not in your hand' });
+  await assert.rejects(() => chooseCard('ABC123', 99), /not in your hand/);
+});

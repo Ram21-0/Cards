@@ -154,3 +154,11 @@ export const leaveLobby = (code) => request(`${gamePath(code)}/leave`, { method:
 
 /** Host: starts the game (needs at least 2 seats); seats are renumbered 1..n. */
 export const startLiveGame = (code) => request(`${gamePath(code)}/start`, { method: 'POST' });
+
+// ---- Playing (see LIVE.md "REST: playing"). Both answer with your own `view` (same shape as the socket's view message). ----
+
+/** Call a stat (a stat `key` of the deck): you are the caller, or you are racing in a clash. */
+export const callStat = (code, stat) => request(`${gamePath(code)}/call`, { method: 'POST', body: { stat } });
+
+/** CHOOSE: put a card from `view.ownHand` in play (`cardId` is its id). */
+export const chooseCard = (code, cardId) => request(`${gamePath(code)}/choose`, { method: 'POST', body: { cardId } });
