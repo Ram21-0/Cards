@@ -307,3 +307,16 @@ export function overSummary({ over, game, mySeat }) {
     : `You finished ${ordinal(mine)}`;
   return { title, rows, won: mine === 1, endedByRoundCap: Boolean(over?.endedByRoundCap) };
 }
+
+/**
+ * Your own cards in the order they come up (names only), from the view's `ownPile`.
+ * null when the server does not send the field (older server): the section is then not shown.
+ */
+export function pileList(view) {
+  const pile = view?.ownPile;
+  if (!Array.isArray(pile)) return null;
+  return pile.map((c, i) => ({ position: i + 1, id: typeof c === 'object' && c ? c.id ?? null : null, name: typeof c === 'object' && c ? String(c.name ?? '') : String(c) }));
+}
+
+/** Title of that section: with CHOOSE still open nothing is in play yet, so it is the whole pile. */
+export const pileTitle = (view) => (view?.canChoose && !view?.committed ? 'Your pile, in order' : 'Your cards after this turn');

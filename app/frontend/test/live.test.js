@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { wsUrl, backoffDelay, skewMs, initialLive, applyMessage, seatName, seatRows, phaseInfo, secondsLeft, createLiveClient, PING_MS,
-  foldRounds, eventText, callCard, clashInfo, ordinal, overFromGame, overSummary } from '../js/live.js';
+  foldRounds, eventText, callCard, clashInfo, ordinal, overFromGame, overSummary, pileList, pileTitle } from '../js/live.js';
 
 const game = (over = {}) => ({
   id: 'g1', joinCode: 'K7Q2XM', status: 'WAITING', maxPlayers: 4, deck: { id: 'd', name: 'Wrestling' }, hostSeat: 1,
@@ -368,4 +368,22 @@ test('overSummary: winner, runner-up, shared first place, and sorted rows', () =
   assert.deepEqual(tie.rows.map((r) => r.seat), [1, 3, 2]);                // shared 1st by seat, then 2nd
   assert.equal(overSummary({ over: { placements: {} }, game: g, mySeat: 1 }).title, 'Game over');   // placements unknown
   assert.equal(overFromGame(g).placements[1], undefined);
+});
+
+test('pileList: your own cards in turn order, names only; null when the server does not send it', () => {
+  assert.equal(pileList(null), null);
+  assert.equal(pileList({}), null);                                           // older server: no section
+  assert.equal(pileList({ ownPile: 'nope' }), null);
+  assert.deepEqual(pileList({ ownPile: [] }), []);                            // sent but empty: only the card in play is left
+  const rows = pileList({ ownPile: [{ id: 17, name: 'Savage Kane' }, { id: 4, name: 'Iron Duke' }] });
+  assert.deepEqual(rows, [{ position: 1, id: 17, name: 'Savage Kane' }, { position: 2, id: 4, name: 'Iron Duke' }]);
+  assert.deepEqual(pileList({ ownPile: ['A', 'B'] }).map((r) => r.name), ['A', 'B']);   // plain names are fine too
+  assert.deepEqual(pileList({ ownPile: [{ id: 1 }] })[0], { position: 1, id: 1, name: '' });
+});
+
+test('pileTitle: "after this turn" once a card is in play, "your pile" while you can still choose', () => {
+  assert.equal(pileTitle({ canChoose: false }), 'Your cards after this turn');
+  assert.equal(pileTitle({ canChoose: true, committed: null }), 'Your pile, in order');
+  assert.equal(pileTitle({ canChoose: true, committed: { id: 1 } }), 'Your cards after this turn');
+  assert.equal(pileTitle(null), 'Your cards after this turn');
 });

@@ -35,6 +35,7 @@ Contract: `app/backend/LIVE.md`. The lobby and the table are the same screen, `#
   - **Your turn:** your card plus one button per stat showing its value. In a **clash** every tied player may race: the banner shows ⚔ CLASH ×N, who is tied, and a big countdown; the first call wins.
   - **CHOOSE** (few cards left): tap any card in your hand and confirm, or "Play top card"; the stat in play is highlighted on every card.
   - **What just happened:** the server's `events` feed a *Last round* panel (the revealed cards with the stat highlighted, the winner, cards won, eliminations) and a short feed of recent events. Moves made by the clock or for an absent player are marked "(time ran out)" / "(auto)".
+  - **Your cards after this turn:** a collapsible list of your own cards, names only, in the order they will come up (next one marked; the open/closed choice is remembered). It needs the server's `ownPile` field in the `view` (see LIVE.md); an older server without it simply shows no section.
   - **Game over:** the result ("You won!", "You finished 2nd"), the ranking, and "New game with this deck". Reopening a finished game shows the ranking from the server (no socket).
   - Refused moves (not your turn, too late in a clash race…) show the server's message and leave the panel usable. Pure logic (`foldRounds`, `eventText`, `clashInfo`, `overSummary`, stale-view guard) is in `js/live.js` with tests.
 

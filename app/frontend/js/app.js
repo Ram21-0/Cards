@@ -1,7 +1,7 @@
 import { Game, RESULT, DIFFICULTY } from './engine.js';
 import {
   wsUrl, createLiveClient, initialLive, applyMessage, seatName, seatRows, phaseInfo, secondsLeft,
-  eventText, callCard, clashInfo, overSummary, overFromGame, ordinal,
+  eventText, callCard, clashInfo, overSummary, overFromGame, ordinal, pileList, pileTitle,
 } from './live.js';
 import { parseRoute, toHash, paths, backDecision, needsUnloadGuard, redirectFor, upAction } from './nav.js';
 import {
@@ -790,6 +790,20 @@ function buildLastRound(ctx, lr) {
     ...lr.eliminated.map((e) => el('p', { class: 'result out' }, `${seatName(g, e.seat)} is out (#${e.placement})`)));
 }
 
+/** Your own cards in the order they come up after this turn: just the names, collapsible (the choice is remembered). */
+function pileSection(ctx) {
+  const rows = pileList(ctx.view);
+  if (!rows) return '';                                                   // the server does not send ownPile
+  const details = el('details', { class: 'pile' },
+    el('summary', {}, el('span', {}, pileTitle(ctx.view)), el('span', { class: 'pill' }, String(rows.length))),
+    rows.length
+      ? el('ol', {}, rows.map((r, i) => el('li', {}, r.name, i === 0 ? el('em', {}, ' · next') : '')))
+      : el('p', { class: 'hint' }, 'No other cards: only the one in play.'));
+  details.open = ctx.pileOpen ?? store('pileOpen') !== '0';               // open unless the player closed it before
+  details.addEventListener('toggle', () => { ctx.pileOpen = details.open; store('pileOpen', details.open ? '1' : '0'); });
+  return details;
+}
+
 /** The last few things that happened, newest first. */
 function feedList(ctx) {
   const g = ctx.game;
@@ -854,6 +868,7 @@ function liveScreen(ctx) {
     committed ? el('div', { class: 'card-wrap committed' }, el('p', { class: 'hint' }, 'Played this round'), cardView(committed, ctx.deck, { highlight: v.stat })) : '',
     hand.length ? el('div', { class: 'hand' }, hand.map((c) => el('div', { class: 'card-wrap' }, cardView(c, ctx.deck, { highlight: v.stat })))) : '',
     v && !ctx.deck ? el('p', { class: 'hint' }, 'Loading your cards…') : '',
+    pileSection(ctx),
     feedList(ctx),
   ];
 }
