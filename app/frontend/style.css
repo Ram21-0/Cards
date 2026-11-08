@@ -194,3 +194,38 @@ h3.section { font-size: 14px; text-transform: uppercase; letter-spacing: .08em; 
 .dialog p { margin: 0; color: var(--muted); }
 .dialog .btn-row { margin-top: 6px; }
 .dialog .btn { flex: 1; }
+
+/* ===================== live lobby + table ===================== */
+.conn { font-size: 12px; font-weight: 700; padding: 3px 10px; border-radius: 99px; border: 1px solid var(--line); color: var(--muted); }
+.conn.open { color: var(--win); border-color: var(--win); }
+.conn.connecting, .conn.reconnecting { color: var(--clash); border-color: var(--clash); }
+.conn.closed { color: var(--loss); border-color: var(--loss); }
+
+.seats .seat-name { flex: 1; }
+.seat-x { background: transparent; border: 1px solid var(--line); color: var(--muted); border-radius: 8px; width: 32px; height: 32px; padding: 0; line-height: 1; }
+.seat-x:hover:not(:disabled) { color: var(--loss); border-color: var(--loss); }
+.seat-x:disabled { opacity: .4; }
+
+.table-status { text-align: center; gap: 6px; }
+.table-status .status { min-height: 0; }
+.table-status.clash { border-color: var(--loss); background: rgba(255, 93, 93, .1); }
+.table-status.clash .status { color: var(--loss); font-weight: 800; letter-spacing: .02em; }
+.status-meta { display: flex; justify-content: center; align-items: center; gap: 12px; color: var(--muted); font-size: 14px; }
+.countdown { font-variant-numeric: tabular-nums; font-weight: 800; color: var(--accent); min-width: 2.5em; }
+.pill { font-size: 12px; font-weight: 700; padding: 2px 9px; border-radius: 99px; background: var(--bg-2); border: 1px solid var(--line); color: var(--muted); white-space: nowrap; }
+
+.table { list-style: none; margin: 0; padding: 0; display: grid; gap: 8px; }
+.table li { display: flex; align-items: center; gap: 10px; background: var(--panel); border: 1px solid var(--line); border-radius: 12px; padding: 10px 14px; }
+.table li.mine { border-color: var(--accent); }
+.table li.caller { box-shadow: inset 3px 0 0 var(--accent); }
+.table li.contender { border-color: var(--loss); }
+.table li.out { opacity: .5; }
+.table .seat-name { flex: 1; font-weight: 600; }
+.table .seat-name em { color: var(--muted); font-style: normal; font-weight: 400; }
+.table .seat-no { width: 26px; height: 26px; border-radius: 50%; display: grid; place-items: center; font-size: 13px; font-weight: 700; background: var(--bg-2); color: var(--muted); }
+.tag { font-size: 11px; font-weight: 800; text-transform: uppercase; letter-spacing: .06em; color: var(--accent); }
+.tag.clash { color: var(--loss); }
+
+.hand { display: flex; gap: 12px; overflow-x: auto; padding: 4px 2px 12px; scroll-snap-type: x proximity; }
+.hand .card-wrap { flex: 0 0 min(260px, 72vw); margin: 0; scroll-snap-align: start; }
+.committed { text-align: center; }

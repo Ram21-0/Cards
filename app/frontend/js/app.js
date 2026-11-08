@@ -1,7 +1,8 @@
 import { Game, RESULT, DIFFICULTY } from './engine.js';
+import { wsUrl, createLiveClient, initialLive, applyMessage, seatName, seatRows, phaseInfo, secondsLeft } from './live.js';
 import { parseRoute, toHash, paths, backDecision, needsUnloadGuard, redirectFor, upAction } from './nav.js';
 import {
-  API_BASE, ApiError, fetchDecks, fetchDeck, createGame, getGame, joinGame,
+  API_BASE, ApiError, fetchDecks, fetchDeck, createGame, getGame, joinGame, addCpu, removeSeat, leaveLobby, startLiveGame, fetchDeckStats, mapCard,
   fetchNonce, googleSignIn, fetchMe, updateMe, signOut, deleteAccount, devLogin,
 } from './api.js';
 import { offlineDeck } from './offline.js';
@@ -115,6 +116,16 @@ function nav(path, { replace = false } = {}) {
   render();
 }
 
+/**
+ * A lobby opened from a shared link is the first history entry of the visit, so Back would leave the page (no confirm,
+ * and a seat you hold stays taken). Put the gallery underneath it so Back stays inside the app and meets the guard.
+ */
+function ensureParentEntry() {
+  if ((histState().idx ?? 0) > 0) return;
+  history.replaceState({ idx: 0, from: null }, '', toHash(paths.decks()));
+  history.pushState({ idx: 1, from: toHash(paths.decks()) }, '', toHash(current.path));
+}
+
 /** Back out of a screen to its parent without growing the history. */
 function goUp(parent) {
   if (upAction(history.state, parent) === 'back') history.back();      // the popstate handler renders
@@ -131,6 +142,7 @@ function render() {
   const route = parseRoute(location.hash);
   const redirect = redirectFor(route, { hasGame: Boolean(game) });
   if (redirect) { history.replaceState({ idx: histState().idx ?? 0, from: histState().from ?? null }, '', toHash(redirect)); return render(); }
+  closeLive();                                                          // a lobby/live screen re-opens its own connection
   current = route;
   if (route.name !== 'play' && game?.over) game = null;                 // a finished game is not kept around
   switch (route.name) {
@@ -149,8 +161,8 @@ function render() {
 // Browser Back / Forward / phone Back gesture. Leaving a running game asks first.
 window.addEventListener('popstate', () => {
   const to = parseRoute(location.hash);
-  if (backDecision({ from: current, to, gameActive: isGameActive() }) === 'confirm') {
-    // Undo the Back: put the game's entry back on top and ask. The screen was never re-rendered, so the game is untouched.
+  if (backDecision({ from: current, to, gameActive: isGameActive(), seated: isSeated() }) === 'confirm') {
+    // Undo the Back: put the game's/lobby's entry back on top and ask. The screen was never re-rendered, so nothing is lost.
     history.pushState({ idx: (histState().idx ?? 0) + 1, from: location.hash || toHash(paths.menu()) }, '', toHash(current.path));
     askLeave();
     return;
@@ -166,17 +178,40 @@ window.addEventListener('beforeunload', (e) => {
 let leaving = null;   // the open "Leave this game?" dialog, if any
 /** The one path for leaving a game (Back button, gesture and the Quit button): confirm first. */
 function askLeave() {
-  leaving ??= confirmDialog({ title: 'Leave this game?', text: 'The game ends and your cards are lost.', stay: 'Stay', leave: 'Leave' })
+  leaving ??= confirmDialog(leaveDialog())
     .then((leave) => { leaving = null; if (leave) leaveGame(); });
   return leaving;
+}
+
+/** Wording of the "are you sure?" dialog for whatever is on screen. */
+function leaveDialog() {
+  const g = live?.game;
+  if (live && g?.status === 'IN_PROGRESS') {
+    return { title: 'Leave this game?', text: `The game keeps going without you. You stay seated and can come back with the code ${g.joinCode} while it is running.`, stay: 'Stay', leave: 'Leave' };
+  }
+  if (live) {
+    const host = live.mySeat === g.hostSeat;
+    return { title: 'Leave this lobby?', text: host ? 'You are the host: hosting passes to the next player, and the game closes if nobody else is here.' : 'You give up your seat.', stay: 'Stay', leave: 'Leave' };
+  }
+  return { title: 'Leave this game?', text: 'The game ends and your cards are lost.', stay: 'Stay', leave: 'Leave' };
 }
 
 /**
  * The single place a game session ends. A live multiplayer game will also tell the server here
  * (POST /api/games/{code}/leave — see app/backend/LIVE.md); until that exists it only ends the local game.
  */
-function leaveGame() {
-  game = null;
+async function leaveGame() {
+  const ctx = live;
+  if (ctx) {                                          // a lobby or a live table
+    const code = ctx.code;
+    const waiting = ctx.game.status === 'WAITING' && ctx.mySeat != null;
+    closeLive();                                      // stop the socket first so it does not reconnect
+    if (waiting) {                                    // a running game cannot be left on the server yet: we just disconnect
+      try { await leaveLobby(code); } catch (e) { if (!(e instanceof ApiError && e.status === 409)) toast(e instanceof ApiError ? e.message : 'Could not reach the server'); }
+    }
+    return goUp(paths.decks());
+  }
+  game = null;                                        // a solo game
   goUp(paths.menu());
 }
 
@@ -392,42 +427,36 @@ async function copyText(text, what) {
   toast(`${what} copied`);
 }
 
-/** The seat of the signed-in player in this game, if any. */
-const mySeat = (g) => (me?.username ? g.seats.find((s) => s.kind === 'HUMAN' && s.username === me.username) : undefined);
+/* ---------- lobby + live game ---------- */
+// One screen (#/lobby/<code>) shows the lobby while the game is WAITING and the live table once it has started.
+// Seated players get updates over a WebSocket (js/live.js); everyone else, and anyone whose socket is down, polls GET /api/games/{code}.
 
-const seatLabel = (s, g) => {
-  const who = s.kind === 'CPU' ? `CPU (${s.difficulty ?? 'normal'})` : s.username;
-  return who + (s.seat === 1 ? ' · host' : '') + (mySeat(g)?.seat === s.seat ? ' · you' : '');
-};
+let live = null;   // the open lobby / live screen: { code, game, mySeat, view, rt, conn, deck, busy, level, client, ticker, paint }
 
-async function doJoin(g, button) {
-  button.disabled = true;
-  button.textContent = 'Joining…';
-  try {
-    const joined = await joinGame(g.joinCode);
-    toast(`You joined seat ${mySeat(joined)?.seat ?? ''}`.trim());
-    lobby(joined);
-  } catch (e) {
-    button.disabled = false;
-    button.textContent = 'Join game';
-    if (e instanceof ApiError && e.status === 401) {          // session expired
-      me = null;
-      toast('Your session expired — sign in again');
-      return signIn(paths.lobby(g.joinCode));
-    }
-    if (e instanceof ApiError && e.status === 400 && /username/i.test(e.message)) {
-      toast(e.message);
-      return chooseUsername(paths.lobby(g.joinCode));
-    }
-    toast(e instanceof ApiError ? e.message : 'Could not reach the server');
-    if (e instanceof ApiError && e.status === 409) {          // full / already started: show the current state
-      try { lobby(await getGame(g.joinCode)); } catch { /* keep this screen */ }
-    }
-  }
+function closeLive() {
+  if (!live) return;
+  live.client?.close();
+  clearInterval(live.ticker);
+  live = null;
 }
 
-/** Route handler: open a game's lobby by join code (from a shared link, or right after create). */
+/** Do I hold a seat in the lobby / game on screen? (What the Back guard asks.) */
+const isSeated = () => Boolean(live) && live.mySeat != null && ['WAITING', 'IN_PROGRESS'].includes(live.game.status);
+const inTable = (g) => g.status === 'IN_PROGRESS' || g.status === 'FINISHED';
+
+/** My seat number according to the REST body (matched by username), or null. */
+const seatOfMe = (g) => (me?.username ? g.seats.find((s) => s.kind === 'HUMAN' && s.username === me.username)?.seat ?? null : null);
+
+const seatLabel = (g, s, mine) => `${seatName(g, s.seat)}${s.seat === g.hostSeat ? ' · host' : ''}${mine ? ' · you' : ''}`;
+const FATAL_TEXT = {
+  'signed-out': 'You are signed out — sign in again to rejoin the table',
+  'not-seated': 'You do not have a seat in this game',
+  'not-found': 'This game no longer exists',
+};
+
+/** Route handler: open a game by join code (shared link, or right after create). */
 async function lobbyRoute(code) {
+  ensureParentEntry();
   const cached = gameCache.get(code);
   gameCache.delete(code);
   if (cached) return lobby(cached);
@@ -441,55 +470,245 @@ async function lobbyRoute(code) {
 }
 
 function lobby(g) {
-  const link = g.joinUrl ?? `${location.origin}${location.pathname}?join=${g.joinCode}`;
-  const countEl = el('h3', { class: 'section' });
-  const seatsEl = el('ol', { class: 'seats', 'aria-live': 'polite' });
-  const actionEl = el('div', { class: 'lobby-action' });
-  const isHost = () => mySeat(g)?.seat === 1;
-
-  // Seat list + the join / status area; re-run whenever the game changes.
-  const render = () => {
-    countEl.textContent = `Players · ${g.seats.length} / ${g.maxPlayers}`;
-    seatsEl.replaceChildren(...Array.from({ length: g.maxPlayers }, (_, i) => {
-      const s = g.seats.find((x) => x.seat === i + 1);
-      return el('li', { class: `${s ? 'taken' : 'open'}${s && mySeat(g)?.seat === s.seat ? ' mine' : ''}` },
-        el('span', { class: 'seat-no' }, String(i + 1)), s ? seatLabel(s, g) : 'Waiting for a player…');
-    }));
-    const mine = mySeat(g);
-    const join = el('button', { class: 'btn primary wide', onclick: () => doJoin(g, join) }, 'Join game');
-    actionEl.replaceChildren(
-      mine ? el('p', { class: 'hint' }, isHost() ? 'You are the host. Share the code and wait for players.' : `You are in seat ${mine.seat}. Waiting for more players.`)
-        : !me ? el('button', { class: 'btn primary wide', onclick: () => signIn(paths.lobby(g.joinCode)) }, 'Sign in to join')
-        : g.seats.length >= g.maxPlayers ? el('p', { class: 'hint' }, 'This game is full.')
-        : join,
-      el('p', { class: 'hint' }, `${g.deck.name} · up to ${g.maxPlayers} players`));
+  closeLive();
+  const ctx = {
+    code: g.joinCode, game: g, mySeat: seatOfMe(g), view: null, rt: initialLive(), conn: 'idle', deck: null,
+    level: store('cpuLevel') || 'medium', busy: false, client: null, ticker: null,
   };
-  render();
+  live = ctx;
+  const root = screen('');
+  show(root);
+  const id = screenId;
+  ctx.paint = () => {
+    if (live === ctx) root.replaceChildren(...(inTable(ctx.game) ? liveScreen(ctx) : lobbyScreen(ctx)));
+  };
+  ctx.tick = () => {
+    const left = secondsLeft(ctx.view?.deadline, Date.now(), ctx.rt.skewMs);
+    const node = root.querySelector('.countdown');
+    if (node) node.textContent = left == null ? '' : `${left}s`;
+  };
+  ctx.ticker = setInterval(ctx.tick, 500);
 
-  show(screen('',
-    el('div', { class: 'topbar' }, el('button', { class: 'btn small', onclick: () => goUp(paths.decks()) }, '← Decks'), el('h2', {}, 'Game lobby'), el('span')),
+  setGame(ctx, g);
+  pollLoop(ctx, id);
+}
+
+/** Takes a game body (REST or socket): updates what is shown, opens the socket once we hold a seat, loads the deck for the table. */
+function setGame(ctx, g) {
+  if (live !== ctx) return;
+  ctx.game = g;
+  ctx.mySeat = seatOfMe(g) ?? (ctx.client ? ctx.rt.mySeat : null);
+  if (g.status === 'ABANDONED') {
+    toast('This game was closed');
+    closeLive();
+    return goUp(paths.decks());
+  }
+  if (ctx.mySeat != null && !ctx.client && ['WAITING', 'IN_PROGRESS'].includes(g.status)) startSocket(ctx);
+  if (inTable(g) && !ctx.deck) {
+    fetchDeckStats(g.deck.id).then((d) => { ctx.deck = d; ctx.paint(); }).catch(() => {});
+  }
+  ctx.paint();
+}
+
+function startSocket(ctx) {
+  ctx.client = createLiveClient({
+    url: wsUrl({ apiBase: API_BASE, location, code: ctx.code }),
+    probe: () => probeSocket(ctx.code),
+    onStatus: (s) => { if (live === ctx) { ctx.conn = s; ctx.paint(); } },
+    onMessage: (msg) => onLiveMessage(ctx, msg),
+    onFatal: (reason) => {
+      if (live !== ctx) return;
+      toast(FATAL_TEXT[reason] ?? 'Lost the connection');
+      if (reason === 'signed-out') {                          // the session is gone: sign in again, then come back to this table
+        me = null;
+        closeLive();
+        return signIn(paths.lobby(ctx.code));
+      }
+      ctx.conn = 'closed';
+      ctx.paint();
+    },
+  });
+  ctx.client.start();
+}
+
+/** After a refused connection: why? (Browsers hide the handshake status.) null = probably transient, keep retrying. */
+async function probeSocket(code) {
+  try {
+    const m = await fetchMe();
+    if (!m) return 'signed-out';
+    const g = await getGame(code);
+    return g.seats.some((s) => s.kind === 'HUMAN' && s.username === m.username) ? null : 'not-seated';
+  } catch (e) {
+    return e instanceof ApiError && e.status === 404 ? 'not-found' : null;
+  }
+}
+
+function onLiveMessage(ctx, msg) {
+  if (live !== ctx) return;
+  const had = ctx.mySeat != null;
+  ctx.rt = applyMessage(ctx.rt, msg, Date.now());
+  if (msg.type === 'view') { ctx.view = ctx.rt.view; return ctx.paint(); }
+  if (msg.type !== 'lobby' && msg.type !== 'started') return;
+  if (ctx.rt.mySeat == null && had) {                          // we were taken off the seat list
+    toast('You are no longer in this game');
+    closeLive();
+    return goUp(paths.decks());
+  }
+  if (msg.type === 'started') toast('The game has started!');
+  ctx.mySeat = ctx.rt.mySeat;
+  setGame(ctx, ctx.rt.game);
+}
+
+/** Fallback while there is no live socket (visitors, reconnecting, old server): refresh over REST every 4 s. */
+async function pollLoop(ctx, id) {
+  await new Promise((r) => setTimeout(r, 4000));
+  if (screenId !== id || live !== ctx) return;
+  if (!ctx.client?.isOpen()) {
+    try {
+      const fresh = await getGame(ctx.code);
+      if (live === ctx && JSON.stringify(fresh) !== JSON.stringify(ctx.game)) setGame(ctx, fresh);
+    } catch { /* keep showing what we have */ }
+  }
+  pollLoop(ctx, id);
+}
+
+/** Runs a lobby action (join, add CPU, start …): one at a time, shows the server's answer, explains refusals. */
+async function act(ctx, fn) {
+  if (ctx.busy || live !== ctx) return;
+  ctx.busy = true;
+  ctx.paint();
+  try {
+    const g = await fn();
+    if (live === ctx) setGame(ctx, g);
+  } catch (e) {
+    if (live !== ctx) return;
+    if (e instanceof ApiError && e.status === 401) {
+      me = null;
+      toast('Your session expired — sign in again');
+      closeLive();
+      return signIn(paths.lobby(ctx.code));
+    }
+    if (e instanceof ApiError && e.status === 400 && /username/i.test(e.message)) {
+      toast(e.message);
+      closeLive();
+      return chooseUsername(paths.lobby(ctx.code));
+    }
+    toast(e instanceof ApiError ? e.message : 'Could not reach the server');
+    if (e instanceof ApiError && e.status >= 400 && e.status < 500) {          // refused: show what the game really looks like
+      try { setGame(ctx, await getGame(ctx.code)); } catch { /* keep this screen */ }
+    }
+  } finally {
+    if (live === ctx) { ctx.busy = false; ctx.paint(); }
+  }
+}
+
+const CONN_TEXT = { open: '● Live', connecting: 'Connecting…', reconnecting: 'Reconnecting…', closed: 'Offline' };
+function connChip(ctx) {
+  if (ctx.mySeat == null || ctx.conn === 'idle') return el('span');
+  return el('span', { class: `conn ${ctx.conn}`, role: 'status' }, CONN_TEXT[ctx.conn] ?? '');
+}
+
+/** The ← / ✕ button: leaving asks first if you hold a seat. */
+const leaveButton = (ctx, label) => el('button', { class: 'btn small', onclick: () => (isSeated() ? askLeave() : goUp(paths.decks())) }, label);
+
+function lobbyScreen(ctx) {
+  const g = ctx.game;
+  const host = ctx.mySeat != null && ctx.mySeat === g.hostSeat;
+  const seated = ctx.mySeat != null;
+  const full = g.seats.length >= g.maxPlayers;
+  const link = g.joinUrl ?? `${location.origin}${location.pathname}?join=${g.joinCode}`;
+
+  const seats = el('ol', { class: 'seats', 'aria-live': 'polite' },
+    Array.from({ length: g.maxPlayers }, (_, i) => {
+      const s = g.seats.find((x) => x.seat === i + 1);
+      const mine = s && s.seat === ctx.mySeat;
+      return el('li', { class: `${s ? 'taken' : 'open'}${mine ? ' mine' : ''}` },
+        el('span', { class: 'seat-no' }, String(i + 1)),
+        el('span', { class: 'seat-name' }, s ? seatLabel(g, s, mine) : 'Waiting for a player…'),
+        host && s?.kind === 'CPU'
+          ? el('button', { class: 'seat-x', 'aria-label': `Remove the CPU in seat ${s.seat}`, disabled: ctx.busy, onclick: () => act(ctx, () => removeSeat(ctx.code, s.seat)) }, '✕')
+          : '');
+    }));
+
+  const level = el('div', { class: 'segmented compact', role: 'group', 'aria-label': 'CPU difficulty' },
+    ['easy', 'medium', 'hard'].map((d) => el('button', {
+      'aria-pressed': String(ctx.level === d),
+      onclick: () => { ctx.level = d; store('cpuLevel', d); ctx.paint(); },
+    }, d[0].toUpperCase() + d.slice(1))));
+
+  const controls = host
+    ? el('section', { class: 'panel' },
+      el('h3', {}, 'Add a computer player'),
+      el('div', { class: 'row' }, el('span', {}, 'Difficulty'), level),
+      el('button', { class: 'btn', disabled: full || ctx.busy, onclick: () => act(ctx, () => addCpu(ctx.code, ctx.level)) }, full ? 'Table is full' : 'Add CPU'),
+      el('button', { class: 'btn primary wide', disabled: g.seats.length < 2 || ctx.busy, onclick: () => act(ctx, () => startLiveGame(ctx.code)) }, 'Start game'),
+      el('p', { class: 'hint' }, g.seats.length < 2 ? 'You need at least 2 players to start — add a CPU to play right now.' : 'Ready when you are. Nobody can join after the start.'))
+    : '';
+
+  const join = el('button', { class: 'btn primary wide', disabled: ctx.busy, onclick: () => act(ctx, () => joinGame(ctx.code)) }, 'Join game');
+  const action = seated
+    ? el('div', { class: 'lobby-action' },
+      host ? '' : el('p', { class: 'hint' }, `You are in seat ${ctx.mySeat}. Waiting for the host to start the game.`),
+      el('button', { class: 'btn ghost', onclick: askLeave }, 'Leave game'))
+    : g.status !== 'WAITING' ? el('p', { class: 'hint' }, g.status === 'IN_PROGRESS' ? 'This game has already started.' : 'This game is over.')
+    : !me ? el('button', { class: 'btn primary wide', onclick: () => signIn(paths.lobby(g.joinCode)) }, 'Sign in to join')
+    : full ? el('p', { class: 'hint' }, 'This game is full.')
+    : join;
+
+  return [
+    el('div', { class: 'topbar' }, leaveButton(ctx, '← Decks'), el('h2', {}, 'Game lobby'), connChip(ctx)),
     el('section', { class: 'panel lobby' },
-      el('p', { class: 'tagline' }, isHost() ? 'Share this code so others can join' : `Join code for ${g.deck.name}`),
+      el('p', { class: 'tagline' }, host ? 'Share this code so others can join' : `Join code for ${g.deck.name}`),
       el('div', { class: 'join-code', 'aria-label': `Join code ${g.joinCode.split('').join(' ')}` }, g.joinCode),
       el('p', { class: 'link' }, link),
       el('div', { class: 'btn-row' },
         el('button', { class: 'btn', onclick: () => copyText(g.joinCode, 'Code') }, 'Copy code'),
         el('button', { class: 'btn', onclick: () => copyText(link, 'Link') }, 'Copy link'),
         navigator.share ? el('button', { class: 'btn primary', onclick: () => navigator.share({ title: 'Join my Cards game', text: `Join my ${g.deck.name} game with code ${g.joinCode}`, url: link }).catch(() => {}) }, 'Share') : '')),
-    countEl, seatsEl, actionEl));
+    el('h3', { class: 'section' }, `Players · ${g.seats.length} / ${g.maxPlayers}`),
+    seats,
+    controls,
+    action,
+    el('p', { class: 'hint' }, `${g.deck.name} · up to ${g.maxPlayers} players`),
+  ];
+}
 
-  // Keep the seat list fresh while this screen is open.
-  const id = screenId;
-  const poll = async () => {
-    await new Promise((r) => setTimeout(r, 4000));
-    if (screenId !== id) return;
-    try {
-      const fresh = await getGame(g.joinCode);
-      if (screenId === id && JSON.stringify(fresh.seats) !== JSON.stringify(g.seats)) { g = fresh; render(); }
-    } catch { /* keep showing what we have */ }
-    poll();
-  };
-  poll();
+/** You see your whole hand only when CHOOSE lets you play any card; otherwise just the card on top of your pile. */
+function handTitle(v, mySeat) {
+  const total = v.handSizes?.[mySeat] ?? v.ownHand.length;
+  const visible = v.ownHand.length + (v.committed ? 1 : 0);
+  return visible >= total ? `Your hand · ${v.ownHand.length}` : `Your top card · ${total} in your pile`;
+}
+
+/** The table once the game has started: who is where, whose call it is, and your own hand. */
+function liveScreen(ctx) {
+  const g = ctx.game;
+  const v = ctx.view;
+  const statLabel = ctx.deck?.stats.find((s) => s.key === v?.stat)?.label;
+  const info = phaseInfo({ view: v, game: g, mySeat: ctx.mySeat, statLabel });
+  const rows = seatRows(g, v, ctx.mySeat);
+  const left = secondsLeft(v?.deadline, Date.now(), ctx.rt.skewMs);
+  const hand = ctx.deck && v ? v.ownHand.map((c) => mapCard(c, ctx.deck.stats)) : [];
+  const committed = ctx.deck && v?.committed ? mapCard(v.committed, ctx.deck.stats) : null;
+
+  return [
+    el('div', { class: 'topbar' }, el('button', { class: 'btn small ghost', onclick: () => (isSeated() ? askLeave() : goUp(paths.decks())) }, '✕ Leave'), el('h2', {}, g.deck.name), connChip(ctx)),
+    el('section', { class: `panel table-status${info.clash ? ' clash' : ''}`, role: 'status' },
+      v ? el('div', { class: 'status-meta' }, el('b', {}, `Round ${v.round}`), v.potSize > 0 ? el('span', { class: 'pill' }, `Pot · ${v.potSize}`) : '', el('span', { class: 'countdown' }, left == null ? '' : `${left}s`)) : '',
+      el('p', { class: 'status' }, info.text)),
+    el('ol', { class: 'table' }, rows.map((r) =>
+      el('li', { class: `${r.isMe ? 'mine' : ''}${r.out ? ' out' : ''}${r.isCaller ? ' caller' : ''}${r.isContender ? ' contender' : ''}` },
+        el('span', { class: 'seat-no' }, String(r.seat)),
+        el('span', { class: 'seat-name' }, r.name, r.isMe ? el('em', {}, ' · you') : '', r.seat === g.hostSeat ? el('em', {}, ' · host') : ''),
+        r.isCaller && !r.out ? el('span', { class: 'tag' }, 'calls') : '',
+        r.isContender ? el('span', { class: 'tag clash' }, 'clash') : '',
+        r.placement != null ? el('span', { class: 'tag' }, `#${r.placement}`) : '',
+        el('span', { class: 'pill' }, r.handSize == null ? '–' : r.out ? 'out' : `${r.handSize} cards`)))),
+    v ? el('h3', { class: 'section' }, handTitle(v, ctx.mySeat)) : '',
+    committed ? el('div', { class: 'card-wrap committed' }, el('p', { class: 'hint' }, 'Played this round'), cardView(committed, ctx.deck)) : '',
+    hand.length ? el('div', { class: 'hand' }, hand.map((c) => el('div', { class: 'card-wrap' }, cardView(c, ctx.deck)))) : (v ? el('p', { class: 'hint' }, ctx.deck ? 'You have no cards in hand.' : 'Loading your cards…') : ''),
+    el('p', { class: 'hint' }, 'The table is live. Calling a stat and choosing cards are being added next.'),
+  ];
 }
 
 /* ---------- sign-in (Google) ---------- */

@@ -55,28 +55,41 @@ export async function fetchDeck(id) {
   return mapDeck(deck, cards);
 }
 
-/** API JSON -> frontend deck model. Cards that lack one of the deck's stats are dropped (the engine needs them all). */
-export function mapDeck(deckJson, cardsJson) {
-  const stats = [...deckJson.stats]
+/** Deck JSON -> the stat definitions the UI uses, ordered for display. */
+export function mapStats(deckJson) {
+  return [...deckJson.stats]
     .sort((a, b) => a.displayOrder - b.displayOrder)
     .map((s) => ({ key: s.key, label: s.label, unit: s.unit ?? null, higherWins: s.comparisonStrategy === 'HIGHER_WINS' }));
+}
 
-  const cards = cardsJson
-    .map((c) => ({
-      id: c.id,
-      name: c.name,
-      img: c.img ?? null,
-      brand: c.meta?.brand ?? null,
-      stats: Object.fromEntries(stats
-        .filter((s) => c.stats?.[s.key])
-        .map((s) => [s.key, { value: Number(c.stats[s.key].value), display: c.stats[s.key].displayValue }])),
-    }))
-    .filter((c) => stats.every((s) => s.key in c.stats));
+/** One card from the API (REST cards, or a hand in a live `view`) -> frontend card. Stats missing from the card are skipped. */
+export function mapCard(c, stats) {
+  return {
+    id: c.id,
+    name: c.name,
+    img: c.img ?? null,
+    brand: c.meta?.brand ?? null,
+    stats: Object.fromEntries(stats
+      .filter((s) => c.stats?.[s.key])
+      .map((s) => [s.key, { value: Number(c.stats[s.key].value), display: c.stats[s.key].displayValue }])),
+  };
+}
+
+/** API JSON -> frontend deck model. Cards that lack one of the deck's stats are dropped (the engine needs them all). */
+export function mapDeck(deckJson, cardsJson) {
+  const stats = mapStats(deckJson);
+  const cards = cardsJson.map((c) => mapCard(c, stats)).filter((c) => stats.every((s) => s.key in c.stats));
 
   if (cards.length !== cardsJson.length) {
     console.warn(`${cardsJson.length - cards.length} card(s) skipped: missing one of the deck's stats`);
   }
   return { id: deckJson.id, name: deckJson.name, description: deckJson.description ?? '', source: 'api', stats, cards };
+}
+
+/** Just the stat definitions of a deck (for labelling cards in a live game): { id, name, stats }. */
+export async function fetchDeckStats(id) {
+  const d = await getJson(`/api/decks/${encodeURIComponent(id)}`);
+  return { id: d.id, name: d.name, stats: mapStats(d) };
 }
 
 /**
@@ -126,3 +139,18 @@ export const deleteAccount = () => request('/api/me', { method: 'DELETE' });
 
 /** Local development only: signs in without Google. The server answers 404 anywhere else. Resolves Me. */
 export const devLogin = (username) => request('/api/dev/login', { method: 'POST', body: { username } });
+
+// ---- Lobby actions (see app/backend/LIVE.md). Each resolves the updated game body, like getGame. ----
+const gamePath = (code) => `/api/games/${encodeURIComponent(code)}`;
+
+/** Host: adds a CPU in the lowest free seat. difficulty: 'easy' | 'medium' | 'hard'. */
+export const addCpu = (code, difficulty) => request(`${gamePath(code)}/cpu`, { method: 'POST', body: { difficulty } });
+
+/** Host: removes a CPU seat (human seats cannot be removed). */
+export const removeSeat = (code, seat) => request(`${gamePath(code)}/seats/${seat}`, { method: 'DELETE' });
+
+/** Leaves a game that has not started. The host passes to the next human; the last one out closes the game. */
+export const leaveLobby = (code) => request(`${gamePath(code)}/leave`, { method: 'POST' });
+
+/** Host: starts the game (needs at least 2 seats); seats are renumbered 1..n. */
+export const startLiveGame = (code) => request(`${gamePath(code)}/start`, { method: 'POST' });

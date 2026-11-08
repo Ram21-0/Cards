@@ -54,10 +54,13 @@ export const paths = {
 
 /**
  * The user pressed Back (or Forward / edited the hash). Is it fine to leave `from` for `to`?
- * A game in progress must never be left without asking.
+ * A solo game in progress, or a lobby / live game where you hold a seat, must never be left without asking.
  */
-export function backDecision({ from, to, gameActive }) {
-  return from?.name === 'play' && to?.name !== 'play' && gameActive ? 'confirm' : 'allow';
+export function backDecision({ from, to, gameActive = false, seated = false }) {
+  const leavingSolo = from?.name === 'play' && to?.name !== 'play' && gameActive;
+  const sameLobby = to?.name === 'lobby' && to.params?.code === from?.params?.code;
+  const leavingTable = from?.name === 'lobby' && !sameLobby && seated;
+  return leavingSolo || leavingTable ? 'confirm' : 'allow';
 }
 
 /** Warn on reload / tab close only while a game is in progress on screen. */

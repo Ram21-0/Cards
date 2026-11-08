@@ -60,3 +60,18 @@ test('going up: Back if the previous entry is the parent, otherwise replace', ()
   assert.equal(upAction({ idx: 0, from: null }, '/'), 'replace');
   assert.equal(upAction(null, '/'), 'replace');
 });
+
+test('Back out of a lobby / live game asks only when you hold a seat', () => {
+  const lobby = parseRoute('#/lobby/ABC123');
+  assert.equal(backDecision({ from: lobby, to: parseRoute('#/deck/d1'), seated: true }), 'confirm');
+  assert.equal(backDecision({ from: lobby, to: parseRoute('#/decks'), seated: true }), 'confirm');
+  assert.equal(backDecision({ from: lobby, to: parseRoute('#/decks'), seated: false }), 'allow');       // just looking at a link
+  assert.equal(backDecision({ from: lobby, to: parseRoute('#/lobby/ABC123'), seated: true }), 'allow');  // same lobby
+  assert.equal(backDecision({ from: lobby, to: parseRoute('#/lobby/XYZ999'), seated: true }), 'confirm'); // a different game
+  assert.equal(backDecision({ from: parseRoute('#/decks'), to: lobby, seated: true }), 'allow');          // going in is fine
+});
+
+test('the solo-game rule is unchanged by the lobby rule', () => {
+  assert.equal(backDecision({ from: parseRoute('#/play'), to: parseRoute('#/'), gameActive: true, seated: false }), 'confirm');
+  assert.equal(backDecision({ from: parseRoute('#/play'), to: parseRoute('#/'), gameActive: false, seated: true }), 'allow');
+});
