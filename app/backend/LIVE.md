@@ -116,7 +116,7 @@ After the game has started a reconnecting client also gets a `lobby` first (stat
 ```json
 {
   "type": "view", "serverTime": "2026-11-08T10:00:01Z",
-  "seat": 1, "phase": "AWAITING_CALL", "round": 1, "callerSeat": 1, "stat": null,
+  "seat": 1, "phase": "AWAIT_CALL", "round": 1, "callerSeat": 1, "stat": null,
   "clashLevel": 0, "potSize": 0, "deadline": null, "contenders": [1, 2],
   "handSizes": {"1": 6, "2": 6},
   "ownHand": [ {"id":"…","name":"…","stats":{…}} ],
