@@ -1,0 +1,11 @@
+# Master changelog. Add new files under changes/ and include them here, in order.
+# Rule: never edit a changeSet that has run on a shared database — add a new one instead.
+databaseChangeLog:
+  - include:
+      file: db/changelog/changes/001-init.yaml
+  - include:
+      file: db/changelog/changes/002-auth.yaml
+  - include:
+      file: db/changelog/changes/003-game-settings.yaml
+  - include:
+      file: db/changelog/changes/004-extreme-difficulty.yaml

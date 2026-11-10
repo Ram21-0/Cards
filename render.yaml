@@ -1,0 +1,22 @@
+# Render Blueprint: Dashboard -> New -> Blueprint -> pick this repo/branch.
+# Names only, NO values: secrets are entered in the Render dashboard (sync: false = "ask me, don't store in git").
+# PORT is set by Render itself (10000); the app reads it, so it is not listed.
+services:
+  - type: web
+    name: cards
+    runtime: docker
+    dockerfilePath: ./Dockerfile
+    dockerContext: .
+    plan: free                 # free sleeps after ~15 min idle; change to "starter" (~$7/mo) for always-on
+    region: ohio              # Neon project is in AWS us-east-2 (Ohio): keep Render in the same region
+    healthCheckPath: /api/health
+    autoDeploy: false          # deploy deliberately (Manual Deploy) until you trust the pipeline
+    envVars:
+      - key: APP_ENV
+        value: prod            # not a secret: selects classpath prod/application.yml
+      - key: DATABASE_URL
+        sync: false            # secret: Neon DIRECT (non-pooler) URL, see DEPLOYMENT.md section 3
+      - key: GOOGLE_CLIENT_ID
+        sync: false            # not secret, but environment-specific
+      - key: FRONTEND_ORIGIN
+        sync: false            # e.g. https://cards.onrender.com (exact origin, no trailing slash)

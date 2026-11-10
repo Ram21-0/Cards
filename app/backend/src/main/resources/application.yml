@@ -1,0 +1,44 @@
+# Common settings. Per-environment, non-secret settings live in local/ and prod/ (chosen by APP_ENV, default "local").
+# Secrets (DATABASE_URL) never go in resources/ — they come from .env.<APP_ENV> or real environment variables.
+spring:
+  application:
+    name: cards-backend
+  autoconfigure:
+    exclude: org.springframework.boot.autoconfigure.security.servlet.UserDetailsServiceAutoConfiguration   # we authenticate with our own session tokens
+  config:
+    # Per-environment, non-secret settings (APP_ENV, default "local"). Secrets come from .env.<APP_ENV> or real
+    # environment variables — see config/DotEnvPostProcessor.
+    import: optional:classpath:/${APP_ENV:local}/application.yml
+  liquibase:
+    change-log: classpath:db/changelog/db.changelog-master.yaml
+
+app:
+  game:
+    # Defaults for new games; the host may override max-rounds, choose-threshold, clash-call-seconds and
+    # turn-timeout-seconds when creating a game. (turn-timeout-seconds: none unless set here.) See RULES.md.
+    max-rounds: 500
+    choose-threshold: 3
+    clash-call-seconds: 5
+    # How each CPU difficulty plays. strategy: random | deck-percentile | opponent-percentile | smart | counting.
+    # noise (0..1) mixes random noise into the judgement; 0 = always the best option. See RULES.md §7.
+    cpu:
+      easy:   { strategy: random,              noise: 0 }
+      medium: { strategy: opponent-percentile, noise: 0.25 }
+      hard:   { strategy: smart,               noise: 0 }
+      extreme: { strategy: counting,           noise: 0 }     # smart + card counting (RULES.md §7)
+  google-client-id: ${GOOGLE_CLIENT_ID:}      # empty = Google sign-in answers 503 "not configured". Put it in .env.<APP_ENV>.
+  session:
+    ttl-days: 30
+    cookie-name: session
+    cookie-secure: false
+  live:
+    absence-grace-seconds: 15                 # a human with no open socket on their turn is timed out after this long (LIVE.md)
+    stale-seconds: 90                         # a socket that has been silent this long is closed (the server pings every 25 s)
+  rate-limit:
+    actions: 30                               # lobby/play requests per player ...
+    window-seconds: 10                        # ... per this many seconds
+  dev-login:
+    enabled: false                            # POST /api/dev/login exists only where this is true (local/application.yml)
+
+server:
+  port: ${PORT:8080}

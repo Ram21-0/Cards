@@ -1,0 +1,11 @@
+# Local development (APP_ENV unset or "local")
+logging:
+  level:
+    com.cards: DEBUG
+
+app:
+  dev-login:
+    enabled: true                            # local development only
+  frontend-base-url: http://localhost:8081   # used to build shareable join links
+  cors:
+    allowed-origins: http://localhost:8081   # the frontend dev server

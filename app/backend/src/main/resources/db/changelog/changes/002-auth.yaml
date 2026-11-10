@@ -1,0 +1,54 @@
+# Google sign-in: accounts are identified by Google's stable `sub`, sessions are opaque tokens stored hashed.
+# Additive only: existing players (username-only, created via POST /api/players) keep working until stage 2.
+databaseChangeLog:
+
+  # ---------------------------------------------------------------- players: Google account columns
+  # username becomes NULLABLE: a person who just signed in has none until they choose one (1-8 chars [a-z0-9_]).
+  # Deleting an account anonymizes the row (all of these become NULL) so finished games keep their history.
+  - changeSet:
+      id: 008-players-google-account
+      author: cards
+      changes:
+        - addColumn:
+            tableName: players
+            columns:
+              - column: { name: google_sub, type: text, remarks: "Google's stable account id; identity is NEVER the email" }
+              - column: { name: email, type: text }
+              - column: { name: display_name, type: text }
+              - column: { name: avatar_url, type: text }
+        - addUniqueConstraint: { constraintName: players_google_sub_key, tableName: players, columnNames: google_sub }
+        - dropNotNullConstraint: { tableName: players, columnName: username, columnDataType: text }
+      rollback:
+        - addNotNullConstraint: { tableName: players, columnName: username, columnDataType: text }
+        - dropUniqueConstraint: { constraintName: players_google_sub_key, tableName: players }
+        - dropColumn: { tableName: players, columnName: avatar_url }
+        - dropColumn: { tableName: players, columnName: display_name }
+        - dropColumn: { tableName: players, columnName: email }
+        - dropColumn: { tableName: players, columnName: google_sub }
+
+  # ---------------------------------------------------------------- sessions
+  # token_hash = hex SHA-256 of the random 256-bit token that lives in the cookie / bearer header.
+  # The raw token is never stored, so a database leak does not leak usable sessions.
+  - changeSet:
+      id: 009-sessions
+      author: cards
+      changes:
+        - createTable:
+            tableName: sessions
+            columns:
+              - column: { name: token_hash, type: text, constraints: { primaryKey: true, primaryKeyName: sessions_pkey, nullable: false } }
+              - column: { name: player_id, type: uuid, constraints: { nullable: false } }
+              - column: { name: created_at, type: timestamp with time zone, defaultValueComputed: now(), constraints: { nullable: false } }
+              - column: { name: expires_at, type: timestamp with time zone, constraints: { nullable: false } }
+              - column: { name: last_seen, type: timestamp with time zone, defaultValueComputed: now(), constraints: { nullable: false } }
+        - addForeignKeyConstraint:
+            constraintName: sessions_player_id_fkey
+            baseTableName: sessions
+            baseColumnNames: player_id
+            referencedTableName: players
+            referencedColumnNames: id
+            onDelete: CASCADE
+        - createIndex: { indexName: sessions_player_idx, tableName: sessions, columns: [ { column: { name: player_id } } ] }
+        - createIndex: { indexName: sessions_expires_idx, tableName: sessions, columns: [ { column: { name: expires_at } } ] }
+      rollback:
+        - dropTable: { tableName: sessions }
