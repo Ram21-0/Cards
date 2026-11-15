@@ -11,6 +11,7 @@ import {
   tableKind, seatChips, resultHead, pileView, logGroups, callRule, bestIndex, statLabel, timerModel, timerTotal, urgentAtFor, overHead, holdSeconds,
 } from './table.js';
 import { bigCardNotices, bestStat } from './strength.js';
+import { HOLD_MAX, clampHold, holdText } from './table.js';
 
 const PLACEHOLDER = 'assets/placeholder.png';
 const RING = 163.4;                           // circumference of the timer ring (r = 26)
@@ -98,7 +99,7 @@ function headTimer(ctx, kind, opts = {}) {
   return opts.noLimit && ctx.game.options?.turnTimeoutSeconds == null ? el('div', { class: 'nolimit' }, 'No time limit') : '';
 }
 
-function statGrid(ctx, d, card, { clash = false } = {}) {
+function statGrid(ctx, d, card, { clash = false, onPick = null } = {}) {
   const deck = ctx.deck;
   return el('div', { class: `stats${clash ? ' clashmode' : ''}${ctx.picked ? ' locked' : ''}` }, deck.stats.map((s, i) => {
     const shown = card.stats[s.key]?.display ?? '–';
@@ -108,7 +109,8 @@ function statGrid(ctx, d, card, { clash = false } = {}) {
       onclick: () => {
         if (ctx.pending) return;
         ctx.picked = s.key;
-        d.play(ctx, () => d.callStat(ctx.code, s.key));
+        if (onPick) onPick(s.key);
+        else d.play(ctx, () => d.callStat(ctx.code, s.key));
       },
     }, el('span', { class: 'k', 'aria-hidden': 'true' }, String(i + 1)), el('span', { class: 'l' }, s.label, s.higherWins ? '' : ' ↓'), el('span', { class: 'v' }, shown));
   }));
@@ -218,11 +220,41 @@ function stateClashWatch(ctx, d, v) {
     el('div', { class: 'play' }, el('div', { class: 'acts' }, waitBox(names[0] ?? '?', 'The race is on', 'Waiting for a stat', ''))));
 }
 
+/**
+ * Choose, I am the caller (spec 5b): the card and the stat on ONE screen. The top card is preselected; tapping a stat plays the
+ * selected card (`choose`) and then calls the stat (`call`, once the server's next view allows it).
+ */
+function stateCallerChoose(ctx, d, v, hand) {
+  const stats = ctx.deck.stats;
+  const sel = hand.find((c) => c.id === ctx.pick) ?? hand[0];
+  const top = sel.id === hand[0].id;
+  const send = (key) => d.play(ctx, async () => {
+    const after = await d.chooseCard(ctx.code, sel.id);
+    return after.canCall ? d.callStat(ctx.code, key) : after;               // refused or not yet: the server's view is the truth
+  });
+  return el('main', { class: 'stage st-choose st-callchoose' },
+    head('Your turn', 'gold', 'Pick a card to play, then tap a stat. The top card is preselected.', headTimer(ctx, 'choose', { noLimit: true })),
+    el('div', { class: 'play' },
+      cardZone(top ? 'Playing · top card' : 'Playing', d.cardView(sel, ctx.deck, { highlight: ctx.picked })),
+      el('div', { class: 'acts' },
+        el('div', { class: 'tray', role: 'radiogroup', 'aria-label': 'Your cards' }, hand.map((c, i) => {
+          const best = bestStat(c, ctx.deck.cards, stats);
+          return el('button', { class: `tile${c.id === sel.id ? ' sel' : ''}`, role: 'radio', 'aria-checked': String(c.id === sel.id), disabled: ctx.pending || Boolean(ctx.picked), 'data-i': String(i),
+            onclick: () => { ctx.pick = c.id; ctx.paint(); } },
+            el('span', { class: 'tg' }, i === 0 ? el('b', {}, 'TOP') : ''),
+            el('span', { class: 'tn2' }, el('span', { class: 'n' }, c.name), best ? el('span', { class: 'sl' }, `${best.label} ${best.display}`) : ''));
+        })),
+        ctx.picked ? el('p', { class: 't-hint', style: 'color:var(--accent);font-weight:700' }, `You called ${statLabel(stats, ctx.picked)} with ${sel.name}.`) : '',
+        statGrid(ctx, d, sel, { onPick: send }),
+        el('p', { class: 't-hint' }, 'Tap a stat to play this card and call it'))));
+}
+
 function stateChoose(ctx, d, v) {
   const g = ctx.game;
   const stats = ctx.deck.stats;
   const hand = v.ownHand.map((c) => d.mapCard(c, stats));
   if (!hand.length) return stateWait(ctx, d, v);
+  if (!v.stat && v.callerSeat === ctx.mySeat) return stateCallerChoose(ctx, d, v, hand);
   const stat = v.stat ? stats.find((s) => s.key === v.stat) : null;
   const caller = v.callerSeat === ctx.mySeat ? 'You' : seatName(g, v.callerSeat);
   const sel = hand.find((c) => c.id === ctx.pick) ?? hand[0];
@@ -359,6 +391,7 @@ function hud(ctx, d, v, kind) {
       v ? el('span', { class: `t-pill pool hide-w${clash ? ' clash' : ''}`, 'aria-label': `Pool ${pool} cards` }, 'Pool ', el('b', {}, String(pool))) : ''),
     el('div', { class: 'hud-r' },
       ctx.mySeat != null && connText ? el('span', { class: `t-conn${bad ? ' bad' : ''}`, role: 'status' }, el('i'), connText) : '',
+      ctx.mySeat != null && !finished(ctx) ? el('button', { class: 'ib', 'aria-label': 'Game settings', onclick: () => d.openSettings(ctx) }, '⚙') : '',
       ctx.mySeat != null && v ? [el('button', { class: 'ib w-mid', onclick: () => d.open(ctx, 'log') }, 'Log'), finished(ctx) ? '' : el('button', { class: 'ib w-mid', onclick: () => d.open(ctx, 'pile') }, 'My pile')] : ''));
 }
 
@@ -426,16 +459,44 @@ function side(ctx, d) {
     el('div', { class: 'pane' }, tab === 'log' || finished(ctx) ? logPane(ctx, d) : pilePane(ctx)));
 }
 
+/** Result pause: the host gets a stepper (0 to 20 s, applies from now on), everyone else the current value. Used here and in the lobby. */
+export function holdControl(ctx, d, { cls = 'hold' } = {}) {
+  const g = ctx.game;
+  const value = g.options?.resultHoldSeconds ?? 6;
+  const host = ctx.mySeat != null && ctx.mySeat === g.hostSeat;
+  const step = (delta) => d.setHold(ctx, clampHold(value + delta));
+  if (!host) return el('div', { class: cls }, el('p', { class: 'hold-v' }, `Result pause: ${holdText(value)}`), el('p', { class: 'pnote' }, 'Only the host can change this.'));
+  return el('div', { class: cls },
+    el('div', { class: 'hold-row' },
+      el('span', { class: 'hold-l' }, 'Result pause'),
+      el('button', { class: 'ib', 'aria-label': 'Shorter pause', disabled: ctx.optBusy || value <= 0, onclick: () => step(-1) }, '−'),
+      el('output', { class: 'hold-v', 'aria-live': 'polite' }, holdText(value)),
+      el('button', { class: 'ib', 'aria-label': 'Longer pause', disabled: ctx.optBusy || value >= HOLD_MAX, onclick: () => step(1) }, '+')),
+    el('p', { class: 'pnote' }, 'Applies from now on, also to a result on screen. 0 = no pause.'));
+}
+
+function settingsPane(ctx, d) {
+  const o = ctx.game.options ?? {};
+  const row = (k, v) => el('li', {}, el('span', {}, k), el('b', {}, v));
+  return [holdControl(ctx, d),
+    el('ul', { class: 'info' },
+      row('Time per turn', o.turnTimeoutSeconds == null ? 'No limit' : `${o.turnTimeoutSeconds} s`),
+      row('Clash race', `${o.clashCallSeconds ?? 5} s`),
+      row('Choose a card with', o.chooseThreshold >= 2 ? `2 to ${o.chooseThreshold} cards` : 'never'),
+      row('Round limit', String(o.maxRounds ?? '–')))];
+}
+
 function sheet(ctx, d) {
   if (!ctx.sheet) return '';
+  const settings = ctx.sheet === 'settings';
   const log = ctx.sheet === 'log';
   const enter = ctx.sheetFresh;
   ctx.sheetFresh = false;
-  const node = el('div', { class: `sheet docked${enter ? ' enter' : ''}`, onclick: (e) => { if (e.target === node) d.close(ctx); } },
-    el('div', { class: 't-panel', role: 'dialog', 'aria-modal': 'true', 'aria-label': log ? 'Event log' : 'My pile' },
+  const node = el('div', { class: `sheet${settings ? '' : ' docked'}${enter ? ' enter' : ''}`, onclick: (e) => { if (e.target === node) d.close(ctx); } },
+    el('div', { class: 't-panel', role: 'dialog', 'aria-modal': 'true', 'aria-label': settings ? 'Game settings' : log ? 'Event log' : 'My pile' },
       el('div', { class: 'grab' }),
-      el('div', { class: 'ph' }, el('h3', {}, log ? 'Event log' : `My pile · ${plural(pileCount(ctx), 'card')}`), el('button', { class: 'ib', 'aria-label': 'Close', onclick: () => d.close(ctx) }, '✕')),
-      el('div', { class: 'pane' }, log ? logPane(ctx, d) : pilePane(ctx))));
+      el('div', { class: 'ph' }, el('h3', {}, settings ? 'Game settings' : log ? 'Event log' : `My pile · ${plural(pileCount(ctx), 'card')}`), el('button', { class: 'ib', 'aria-label': 'Close', onclick: () => d.close(ctx) }, '✕')),
+      el('div', { class: 'pane' }, settings ? settingsPane(ctx, d) : log ? logPane(ctx, d) : pilePane(ctx))));
   return node;
 }
 
@@ -494,7 +555,8 @@ export function handleKey(ctx, e, d) {
   if (ctx.sheet || !ctx.view || ctx.mySeat == null) return false;
   const kind = tableKind({ game: ctx.game, view: ctx.view, rt: ctx.rt, mySeat: ctx.mySeat, ui: { dismissedKey: ctx.dismissedKey, overHoldUntil: ctx.overHoldUntil } });
   const n = Number(e.key);
-  if ((kind === 'call' || kind === 'clash') && n >= 1 && n <= (ctx.deck?.stats.length ?? 0) && !ctx.pending && !ctx.picked) {
+  const callerChoose = kind === 'choose' && !ctx.view.stat && ctx.view.callerSeat === ctx.mySeat;
+  if ((kind === 'call' || kind === 'clash' || callerChoose) && n >= 1 && n <= (ctx.deck?.stats.length ?? 0) && !ctx.pending && !ctx.picked) {
     document.querySelectorAll('.tbl .stat')[n - 1]?.click();
     return true;
   }

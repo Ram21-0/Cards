@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
   holdSeconds, isOut, tableKind, callRule, bestIndex, resultRows, resultHead, seatChips, pileView, logGroups,
-  timerTotal, timerModel, urgentAtFor, overHead,
+  timerTotal, timerModel, urgentAtFor, overHead, clampHold, holdText,
 } from '../js/table.js';
 
 const stats = [
@@ -252,4 +252,14 @@ test('overHead: who won, where I finished, how long it lasted, the round-cap wor
   assert.equal(overHead({ over: { ...over, endedByRoundCap: true }, game: g, mySeat: 1 }).sub, 'The round limit ended the game: the player with the most cards wins.');
   assert.equal(overHead({ over, game: g, mySeat: 1 }).sub, 'You finished 2nd of 4.');                    // rounds unknown: leave that out
   assert.equal(overHead({ over, game: g, mySeat: null }).sub, '4 players.');                              // a visitor
+});
+
+test('clampHold / holdText: the result pause is 0 to 20 whole seconds, 0 reads "No pause"', () => {
+  assert.equal(clampHold(7), 7);
+  assert.equal(clampHold(-1), 0);
+  assert.equal(clampHold(21), 20);
+  assert.equal(clampHold('12'), 12);
+  assert.equal(clampHold(undefined), 0);
+  assert.equal(holdText(0), 'No pause');
+  assert.equal(holdText(6), '6 s');
 });

@@ -13,6 +13,11 @@ export function holdSeconds(options, round) {
   return base + (round && (round.clash > 0 || round.eliminated?.length > 0) ? HOLD_EXTRA_SECONDS : 0);
 }
 
+export const HOLD_MAX = 20;
+/** The result pause as a whole number of seconds between 0 and 20. */
+export const clampHold = (n) => Math.min(HOLD_MAX, Math.max(0, Math.round(Number(n) || 0)));
+export const holdText = (n) => (n > 0 ? `${n} s` : 'No pause');
+
 /** Has this player run out of cards (they keep receiving views and may keep watching)? */
 export function isOut(view, mySeat) {
   if (!view || mySeat == null) return false;

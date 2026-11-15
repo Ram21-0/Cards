@@ -152,6 +152,9 @@ export const removeSeat = (code, seat) => request(`${gamePath(code)}/seats/${sea
 /** Leaves a game that has not started. The host passes to the next human; the last one out closes the game. */
 export const leaveLobby = (code) => request(`${gamePath(code)}/leave`, { method: 'POST' });
 
+/** Host: changes a game option while it is waiting or running (only `resultHoldSeconds`, 0 to 20, for now). Resolves the game body. */
+export const updateGameOptions = (code, options) => request(`${gamePath(code)}/options`, { method: 'PATCH', body: options });
+
 /** Host: starts the game (needs at least 2 seats); seats are renumbered 1..n. */
 export const startLiveGame = (code) => request(`${gamePath(code)}/start`, { method: 'POST' });
 

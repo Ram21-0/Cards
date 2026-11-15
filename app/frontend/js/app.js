@@ -1,11 +1,11 @@
 import { Game, RESULT, DIFFICULTY } from './engine.js';
 import { wsUrl, createLiveClient, initialLive, applyMessage, seatName, overFromGame } from './live.js';
-import { buildTable, tickTable, handleKey } from './tableui.js';
+import { buildTable, tickTable, handleKey, holdControl } from './tableui.js';
 import { holdSeconds } from './table.js';
 import { strongMap, bigCardNotices, bigCardText } from './strength.js';
 import { parseRoute, toHash, paths, backDecision, needsUnloadGuard, redirectFor, upAction } from './nav.js';
 import {
-  API_BASE, ApiError, fetchDecks, fetchDeck, createGame, getGame, joinGame, addCpu, removeSeat, leaveLobby, startLiveGame, mapCard, callStat, chooseCard,
+  API_BASE, ApiError, fetchDecks, fetchDeck, createGame, getGame, joinGame, addCpu, removeSeat, leaveLobby, startLiveGame, updateGameOptions, mapCard, callStat, chooseCard,
   fetchNonce, googleSignIn, fetchMe, updateMe, signOut, deleteAccount, devLogin,
 } from './api.js';
 import { offlineDeck } from './offline.js';
@@ -511,6 +511,22 @@ const tableDeps = {
     ctx.paint();
   },
   close(ctx) { ctx.sheet = null; ctx.paint(); },
+  openSettings(ctx) { ctx.sheet = 'settings'; ctx.sheetFresh = true; ctx.focusSheet = true; ctx.paint(); },
+  /** Host: change the result pause. One request at a time; the server's answer (and its broadcast) are the truth, a refusal is explained. */
+  async setHold(ctx, seconds) {
+    if (ctx.optBusy || live !== ctx) return;
+    ctx.optBusy = true;
+    ctx.paint();
+    try {
+      const g = await updateGameOptions(ctx.code, { resultHoldSeconds: seconds });
+      if (live === ctx) { ctx.game = { ...ctx.game, options: g.options }; ctx.tt = null; }
+    } catch (e) {
+      if (live !== ctx) return;
+      toast(e instanceof ApiError ? e.message : 'Could not reach the server');                  // 403 not the host, 400 out of range, 409 game over
+    } finally {
+      if (live === ctx) { ctx.optBusy = false; ctx.paint(); }
+    }
+  },
   toggleMotion(ctx) { ctx.rm = !ctx.rm; store('reduceMotion', ctx.rm ? '1' : '0'); ctx.paint(); },
 };
 
@@ -602,6 +618,7 @@ function onLiveMessage(ctx, msg) {
   }
   if (msg.type === 'options') {                                 // keep the game's rules current: the result hold length, the timers
     ctx.game = { ...ctx.game, options: { ...ctx.game.options, ...msg.options } };
+    ctx.tt = null;                                                // the ring restarts from the new length
     return ctx.paint();
   }
   if (msg.type !== 'lobby' && msg.type !== 'started') return;
@@ -724,6 +741,7 @@ function lobbyScreen(ctx) {
     el('h3', { class: 'section' }, `Players · ${g.seats.length} / ${g.maxPlayers}`),
     seats,
     controls,
+    ctx.mySeat != null ? el('section', { class: 'panel' }, el('h3', {}, 'Game rules'), holdControl(ctx, tableDeps, { cls: 'hold' })) : '',
     action,
     el('p', { class: 'hint' }, `${g.deck.name} · up to ${g.maxPlayers} players`),
   ];

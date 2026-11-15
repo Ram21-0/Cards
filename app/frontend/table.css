@@ -401,3 +401,23 @@ body.in-table { overflow:hidden; }
   .tbl .seat .s-av { width:34px; height:34px; font-size:18px; }
   .tbl .seat .s-name, .tbl .seat[data-n] .s-name { font-size:14.5px; }
 }
+
+/* result pause control (game settings sheet and lobby) */
+.hold .hold-row { display:flex; align-items:center; gap:10px; }
+.hold .hold-l { flex:1; font-weight:700; }
+.hold .hold-v { font:700 22px/1 var(--f-display, 'Arial Narrow', system-ui, sans-serif); min-width:5ch; text-align:center; font-variant-numeric:tabular-nums; margin:0; }
+.hold .ib { min-width:44px; min-height:44px; border-radius:12px; border:1px solid var(--line); background:var(--panel); color:var(--text); font-size:22px; font-weight:700; cursor:pointer; }
+.hold .ib:hover:not(:disabled) { border-color:var(--accent); }
+.hold .ib:disabled { opacity:.4; cursor:default; }
+.hold .pnote { color:var(--muted); font-size:13px; margin:8px 0 0; }
+.tbl .info { list-style:none; margin:16px 0 0; padding:0; display:flex; flex-direction:column; gap:6px; }
+.tbl .info li { display:flex; justify-content:space-between; gap:12px; padding:10px 12px; background:var(--panel); border:1px solid var(--line); border-radius:12px; font-size:14px; }
+.tbl .info li span { color:var(--muted); }
+
+/* caller chooses (spec 5b): the tray sits above the stat buttons, so a little less room for the card */
+.tbl .stage.st-callchoose { --res:514px; }
+@media (max-height:700px) {
+  .tbl .stage.st-callchoose { --res:440px; }
+  .tbl .st-callchoose .cardlab { display:none; }
+}
+.tbl .st-callchoose .tile { min-height:62px; }
