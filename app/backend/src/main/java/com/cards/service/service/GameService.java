@@ -178,7 +178,7 @@ public class GameService {
         games.renumberSeats(game.id());
         List<SeatInfo> numbered = games.findSeats(game.id());
         List<SeatSpec> specs = numbered.stream().map(s -> s.isCpu() ? SeatSpec.cpu(s.difficulty()) : SeatSpec.human()).toList();
-        GameSettings settings = new GameSettings(game.maxRounds(), game.chooseThreshold(), game.clashCallSeconds(), game.turnTimeoutSeconds());
+        GameSettings settings = new GameSettings(game.maxRounds(), game.chooseThreshold(), game.clashCallSeconds(), game.turnTimeoutSeconds(), game.resultHoldSeconds());
         GameEngine engine = engines.create(cards, deck.stats(), specs, settings);
 
         games.markStarted(game.id(), clock.instant());
@@ -214,7 +214,7 @@ public class GameService {
     private GameSettings settingsFor(GameOptions options) {
         GameOptions o = options == null ? GameOptions.NONE : options;
         try {
-            return GameSettings.resolve(o.maxRounds(), o.chooseThreshold(), o.clashCallSeconds(), o.turnTimeoutSeconds(), defaultSettings);
+            return GameSettings.resolve(o.maxRounds(), o.chooseThreshold(), o.clashCallSeconds(), o.turnTimeoutSeconds(), o.resultHoldSeconds(), defaultSettings);
         } catch (IllegalArgumentException e) {
             throw new BadRequestException(e.getMessage());
         }

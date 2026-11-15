@@ -135,6 +135,24 @@ class GameServiceTest {
     }
 
     @Test
+    void theResultHoldOptionIsValidatedAndPassedOn() {
+        when(decks.get(DECK_ID)).thenReturn(deck(54));
+        Game created = game("K7Q2XM", 4, GameStatus.WAITING);
+        when(games.insertIfCodeFree(anyString(), eq(DECK_ID), eq(ANN.id()), eq(4), any())).thenReturn(Optional.of(created));
+        when(games.findSeats(created.id())).thenReturn(List.of(seat(1, "ann")));
+
+        assertEquals("resultHoldSeconds must be between 0 and 20",
+                assertThrows(BadRequestException.class, () -> service.create(DECK_ID, 4, ANN, new GameOptions(null, null, null, null, 21))).getMessage());
+        service.create(DECK_ID, 4, ANN, new GameOptions(null, null, null, null, 9));
+        service.create(DECK_ID, 4, ANN, GameOptions.NONE);
+
+        org.mockito.ArgumentCaptor<com.cards.game.GameSettings> settings = org.mockito.ArgumentCaptor.forClass(com.cards.game.GameSettings.class);
+        verify(games, org.mockito.Mockito.times(2)).insertIfCodeFree(anyString(), eq(DECK_ID), eq(ANN.id()), eq(4), settings.capture());
+        assertEquals(9, settings.getAllValues().get(0).resultHoldSeconds(), "the host's value is used");
+        assertEquals(0, settings.getAllValues().get(1).resultHoldSeconds(), "no option = this fixture's default (4-arg settings have no hold)");
+    }
+
+    @Test
     void retriesWithAnotherCodeOnCollision() {
         when(decks.get(DECK_ID)).thenReturn(deck(54));
         when(games.insertIfCodeFree(anyString(), any(), any(), anyInt(), any()))

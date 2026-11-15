@@ -36,6 +36,7 @@ public final class GameEngine {
 
     public static final int MIN_SEATS = 2;
     public static final int MAX_SEATS = 8;
+    private static final String RESULT_ON_SHOW = "The round result is on show; the next round starts soon";
 
     /** One seat's cards. {@code hand.get(0)} is the top of the pile; the winner's cards go to the bottom (end). */
     private static final class Seat {
@@ -78,6 +79,7 @@ public final class GameEngine {
     private int clashLevel;
     private StatDefinition stat;
     private Instant deadline;
+    private int nextCaller;                                                   // who calls once the ROUND_RESULT hold is over
     private Integer roundWinner;                                              // set when a round ends; null = the pot carried
 
     // ------------------------------------------------------------------------------------------ creating a game
@@ -161,7 +163,7 @@ public final class GameEngine {
         settle(now, Integer.MAX_VALUE);
         requireRunning();
         if (phase != Phase.AWAIT_CHOOSE_CALLER && phase != Phase.AWAIT_CHOOSE_OTHERS && phase != Phase.CLASH_AWAIT_CHOOSE) {
-            throw new GameRuleException(GameRuleException.Kind.WRONG_PHASE, "Not waiting for a card choice");
+            throw new GameRuleException(GameRuleException.Kind.WRONG_PHASE, phase == Phase.ROUND_RESULT ? RESULT_ON_SHOW : "Not waiting for a card choice");
         }
         Seat seat = seatOrThrow(seatNumber);
         if (!pendingChoosers.contains(seatNumber)) throw new GameRuleException(GameRuleException.Kind.NOT_YOUR_TURN, "Seat " + seatNumber + " cannot choose a card now");
@@ -194,7 +196,7 @@ public final class GameEngine {
             if (!contenders.contains(seatNumber)) throw new GameRuleException(GameRuleException.Kind.NOT_YOUR_TURN, "Seat " + seatNumber + " is not in the clash");
             applyClashStat(seatNumber, called, false, now);
         } else {
-            throw new GameRuleException(GameRuleException.Kind.WRONG_PHASE, "Not waiting for a stat");
+            throw new GameRuleException(GameRuleException.Kind.WRONG_PHASE, phase == Phase.ROUND_RESULT ? RESULT_ON_SHOW : "Not waiting for a stat");
         }
         drive(now);
         return drain();
@@ -385,6 +387,9 @@ public final class GameEngine {
                 }
                 case RESOLVE, CLASH_RESOLVE -> resolve(at);
                 case ROUND_DONE -> endRound(at);
+                case ROUND_RESULT -> {
+                    return;                                               // a timed pause: only the clock moves on
+                }
                 case CLASH_AWAIT_CALL -> {
                     return;                                               // humans race; CPUs call from cpuCalls at their due time
                 }
@@ -580,8 +585,17 @@ public final class GameEngine {
             finish(true);
             return;
         }
-        callerSeat = roundWinner != null ? roundWinner : nextActiveAfter(callerSeat);
-        beginRound(at);
+        int next = roundWinner != null ? roundWinner : nextActiveAfter(callerSeat);
+        if (settings.resultHoldSeconds() == 0) {
+            callerSeat = next;
+            beginRound(at);
+            return;
+        }
+        // the round did not end the game: show its result for a while before the next one starts
+        boolean longer = clashLevel > 0 || !knockedOut.isEmpty();
+        nextCaller = next;
+        phase = Phase.ROUND_RESULT;
+        deadline = at.plusSeconds(settings.resultHoldSeconds() + (longer ? GameSettings.EXTRA_HOLD_SECONDS : 0));
     }
 
     private void finish(boolean cap) {
@@ -678,6 +692,10 @@ public final class GameEngine {
                 deadline = null;
             }
             case CLASH_AWAIT_CALL -> applyClashStat(null, stats.get(rnd.nextInt(stats.size())), true, at);
+            case ROUND_RESULT -> {
+                callerSeat = nextCaller;
+                beginRound(at);
+            }
             default -> throw new IllegalStateException("A timeout in phase " + phase);
         }
         drive(at);

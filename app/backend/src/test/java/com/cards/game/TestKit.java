@@ -27,7 +27,7 @@ final class TestKit {
 
     /** CHOOSE off, so a hand of any size just plays its top card. */
     static final GameSettings NO_CHOOSE = new GameSettings(500, 0, 5, null);
-    static final GameSettings DEFAULT = GameSettings.defaults();
+    static final GameSettings DEFAULT = new GameSettings(500, 3, 5, null);   // no result hold: the rule tests step from call to call
 
     private TestKit() {
     }

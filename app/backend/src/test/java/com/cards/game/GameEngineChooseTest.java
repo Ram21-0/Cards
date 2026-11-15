@@ -241,4 +241,15 @@ class GameEngineChooseTest {
         assertEquals(6, e.handSize(1), "the caller's top card is in play but still theirs");
         assertEquals(6, e.view(2).handSizes().get(1));
     }
+
+    // ---------------------------------------------------------------- the caller is eligible too (a CPU caller as well)
+
+    @ParameterizedTest(name = "CPU caller with {0} cards: choose step = {1}")
+    @CsvSource({"1,false", "2,true", "3,true", "4,false"})
+    void theOpeningEventsOfACpuCallerShowTheChooseStepOnlyWhenItApplies(int cards, boolean chooses) {
+        List<GameEvent> opening = GameEngine.withHands(TestKit.STATS, List.of(SeatSpec.cpu(com.cards.common.DifficultyLevel.hard), SeatSpec.human()), DEFAULT,
+                hands(pile(1, 5, cards), pile(2, 5, 6)), 1, 0, new SplittableRandom(1), TestClock.atNow()).pollEvents();
+        List<String> kinds = opening.stream().filter(ev -> ev instanceof CardChosen || ev instanceof StatCalled).map(ev -> ev.getClass().getSimpleName()).toList();
+        assertEquals(chooses ? List.of("CardChosen", "StatCalled") : List.of("StatCalled"), kinds, "CHOOSE comes first, then the call");
+    }
 }

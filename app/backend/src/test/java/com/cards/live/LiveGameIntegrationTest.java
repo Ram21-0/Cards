@@ -552,4 +552,72 @@ class LiveGameIntegrationTest {
 
         assertEquals(3, jdbc.queryForObject("select status from games where join_code = ?", Integer.class, code).intValue());
     }
+
+    @Test
+    void aCallerHoldingFewCardsChoosesFirstAndOnlyThenCalls() throws Exception {
+        // the deal is random, so a human may never get to call before the CPUs finish: play a few games until one did
+        for (int attempt = 1; attempt <= 10; attempt++) {
+            if (playOneGameCheckingCallerChoose("ch" + attempt + "a", "ch" + attempt + "b") >= 1) return;
+        }
+        throw new AssertionError("in 10 games no human was ever the caller with few cards");
+    }
+
+    /** @return how many times a human caller was offered CHOOSE before calling (every one of them is checked) */
+    private int playOneGameCheckingCallerChoose(String annName, String bobName) throws Exception {
+        // 12 cards over 4 seats = 3 each, so every caller is within the CHOOSE threshold (3); resultHoldSeconds 0 also exercises that option
+        Human ann = new Human(annName), bob = new Human(bobName);
+        String deckId = jdbc.queryForObject("select id::text from decks where name = 'Wrestling'", String.class);
+        JsonNode game = call(HttpMethod.POST, "/api/games", ann.token, "{\"deckId\":\"" + deckId
+                + "\",\"maxPlayers\":4,\"options\":{\"maxRounds\":30,\"chooseThreshold\":3,\"resultHoldSeconds\":0}}", 201);
+        assertEquals(0, game.get("options").get("resultHoldSeconds").asInt());
+        String code = game.get("joinCode").asText();
+        call(HttpMethod.POST, "/api/games/" + code + "/join", bob.token, null, 200);
+        call(HttpMethod.POST, "/api/games/" + code + "/cpu", ann.token, "{\"difficulty\":\"easy\"}", 200);
+        call(HttpMethod.POST, "/api/games/" + code + "/cpu", ann.token, "{\"difficulty\":\"hard\"}", 200);
+        ann.connect(code);
+        bob.connect(code);
+        call(HttpMethod.POST, "/api/games/" + code + "/start", ann.token, null, 200);
+
+        java.util.Random random = new java.util.Random(11);
+        int callerChooseSteps = 0;
+        long deadline = System.nanoTime() + java.util.concurrent.TimeUnit.SECONDS.toNanos(60);
+        while ((ann.gameOver == null && bob.gameOver == null) && System.nanoTime() < deadline) {
+            boolean acted = false;
+            for (Human h : new Human[]{ann, bob}) {
+                h.drain();
+                JsonNode v = h.view;
+                if (h.gameOver != null || v == null) continue;
+                int seat = v.get("seat").asInt();
+                int cards = v.get("handSizes").get(String.valueOf(seat)).asInt();
+                String phase = v.get("phase").asText();
+                if ("AWAIT_CHOOSE_CALLER".equals(phase) && v.get("canChoose").asBoolean()) {
+                    assertFalse(v.get("canCall").asBoolean(), "the caller chooses BEFORE calling");
+                    assertTrue(cards >= 2 && cards <= 3, "only a caller with 2.." + 3 + " cards is offered CHOOSE: " + cards);
+                    assertEquals(cards, v.get("ownHand").size(), "the whole hand is sent so the caller can choose");
+                    int cardId = v.get("ownHand").get(random.nextInt(cards)).get("id").asInt();
+                    JsonNode answer = call(HttpMethod.POST, "/api/games/" + code + "/choose", h.token, "{\"cardId\":" + cardId + "}", 200);
+                    assertEquals("AWAIT_CALL", answer.get("phase").asText());
+                    assertTrue(answer.get("canCall").asBoolean(), "after choosing the caller may call");
+                    assertFalse(answer.get("canChoose").asBoolean());
+                    assertEquals(cardId, answer.get("committed").get("id").asInt());
+                    call(HttpMethod.POST, "/api/games/" + code + "/call", h.token, "{\"stat\":\"rank\"}", 200);
+                    callerChooseSteps++;
+                    h.view = null;
+                    acted = true;
+                } else if ("AWAIT_CALL".equals(phase) && v.get("canCall").asBoolean()) {
+                    assertTrue(cards == 1 || cards > 3, "a caller with " + cards + " cards must have been offered CHOOSE first");
+                    call(HttpMethod.POST, "/api/games/" + code + "/call", h.token, "{\"stat\":\"rank\"}", 200);
+                    h.view = null;
+                    acted = true;
+                } else if (v.get("canChoose").asBoolean() || v.get("canCall").asBoolean()) {
+                    acted |= h.act(code, random);
+                }
+            }
+            if (!acted) {
+                Thread.sleep(5);
+                scheduler.advance(java.time.Duration.ofSeconds(1));
+            }
+        }
+        return callerChooseSteps;
+    }
 }

@@ -10,11 +10,12 @@ import java.util.UUID;
  */
 public record CreateGameRequest(UUID deckId, Integer maxPlayers, Options options) {
 
-    public record Options(Integer maxRounds, Integer chooseThreshold, Integer clashCallSeconds, Integer turnTimeoutSeconds) {
+    public record Options(Integer maxRounds, Integer chooseThreshold, Integer clashCallSeconds, Integer turnTimeoutSeconds,
+                         Integer resultHoldSeconds) {
     }
 
     public GameOptions gameOptions() {
         return options == null ? GameOptions.NONE
-                : new GameOptions(options.maxRounds(), options.chooseThreshold(), options.clashCallSeconds(), options.turnTimeoutSeconds());
+                : new GameOptions(options.maxRounds(), options.chooseThreshold(), options.clashCallSeconds(), options.turnTimeoutSeconds(), options.resultHoldSeconds());
     }
 }

@@ -19,6 +19,7 @@ app:
     max-rounds: 500
     choose-threshold: 3
     clash-call-seconds: 5
+    result-hold-seconds: 6      # the round result stays up this long before the next round starts (+3 after a clash or an elimination; 0 = none)
     # How each CPU difficulty plays. strategy: random | deck-percentile | opponent-percentile | smart | counting.
     # noise (0..1) mixes random noise into the judgement; 0 = always the best option. See RULES.md §7.
     cpu:

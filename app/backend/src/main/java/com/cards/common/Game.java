@@ -24,6 +24,7 @@ public class Game {
     private final int chooseThreshold;
     private final int clashCallSeconds;
     private final Integer turnTimeoutSeconds;       // null = no limit
+    private final int resultHoldSeconds;            // how long the round result stays up (0 = no hold)
     private final GameStatus status;
     private final Integer rounds;
     private final Instant createdAt;

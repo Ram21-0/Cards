@@ -114,6 +114,7 @@ public class LivePlay {
             GameEngine engine = live.engine();
             Instant now = clock.instant();
             List<GameEvent> events = new ArrayList<>(engine.tick(now));
+            trackActing(live);                                                    // a new turn may have begun: its grace starts now
             for (int seat : graceDueSeats(live, now)) events.addAll(engine.timeoutSeat(seat));
             afterChange(live, events);
             return null;

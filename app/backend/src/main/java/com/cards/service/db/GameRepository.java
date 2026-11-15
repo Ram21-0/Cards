@@ -35,6 +35,7 @@ public class GameRepository {
             .maxRounds(rs.getInt("max_rounds"))
             .chooseThreshold(rs.getInt("choose_threshold"))
             .clashCallSeconds(rs.getInt("clash_call_seconds"))
+            .resultHoldSeconds(rs.getInt("result_hold_seconds"))
             .turnTimeoutSeconds(rs.getObject("turn_timeout_seconds", Integer.class))
             .status(GameStatus.get(rs.getInt("status")))
             .rounds(rs.getObject("rounds", Integer.class))
@@ -60,11 +61,11 @@ public class GameRepository {
      */
     public Optional<Game> insertIfCodeFree(String joinCode, UUID deckId, UUID hostId, int maxPlayers, GameSettings settings) {
         return jdbc.query("""
-                        insert into games (join_code, deck_id, host_id, max_players, max_rounds, choose_threshold, clash_call_seconds, turn_timeout_seconds)
-                        values (?, ?, ?, ?, ?, ?, ?, ?)
+                        insert into games (join_code, deck_id, host_id, max_players, max_rounds, choose_threshold, clash_call_seconds, turn_timeout_seconds, result_hold_seconds)
+                        values (?, ?, ?, ?, ?, ?, ?, ?, ?)
                         on conflict (join_code) do nothing returning *""",
                 GAME, joinCode, deckId, hostId, maxPlayers, settings.maxRounds(), settings.chooseThreshold(),
-                settings.clashCallSeconds(), settings.turnTimeoutSeconds()).stream().findFirst();
+                settings.clashCallSeconds(), settings.turnTimeoutSeconds(), settings.resultHoldSeconds()).stream().findFirst();
     }
 
     public Optional<Game> findByJoinCode(String joinCode) {

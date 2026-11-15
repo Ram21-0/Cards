@@ -8,12 +8,17 @@ package com.cards.game;
  * @param chooseThreshold    a player with 2…this many cards may CHOOSE; 0 (or 1) disables CHOOSE (0–10)
  * @param clashCallSeconds   time to call a stat in a clash (2–30)
  * @param turnTimeoutSeconds time for a normal call / choose (5–120); null = no limit
+ * @param resultHoldSeconds  how long the round result stays up before the next round starts (0–20; 0 = no hold). A round with a
+ *                           clash or an elimination holds {@link #EXTRA_HOLD_SECONDS} longer
  */
-public record GameSettings(int maxRounds, int chooseThreshold, int clashCallSeconds, Integer turnTimeoutSeconds) {
+public record GameSettings(int maxRounds, int chooseThreshold, int clashCallSeconds, Integer turnTimeoutSeconds, int resultHoldSeconds) {
 
     public static final int DEFAULT_MAX_ROUNDS = 500;
     public static final int DEFAULT_CHOOSE_THRESHOLD = 3;
     public static final int DEFAULT_CLASH_CALL_SECONDS = 5;
+    public static final int DEFAULT_RESULT_HOLD_SECONDS = 6;
+    /** Added to the hold after a round that involved a clash or an elimination. */
+    public static final int EXTRA_HOLD_SECONDS = 3;
 
     public static final int MIN_MAX_ROUNDS = 20;
     public static final int MAX_MAX_ROUNDS = 5000;
@@ -23,9 +28,17 @@ public record GameSettings(int maxRounds, int chooseThreshold, int clashCallSeco
     public static final int MAX_CLASH_CALL_SECONDS = 30;
     public static final int MIN_TURN_TIMEOUT_SECONDS = 5;
     public static final int MAX_TURN_TIMEOUT_SECONDS = 120;
+    public static final int MIN_RESULT_HOLD_SECONDS = 0;
+    public static final int MAX_RESULT_HOLD_SECONDS = 20;
+
+    /** Without a result hold (the engine's own tests and anything that does not care about the pause). */
+    public GameSettings(int maxRounds, int chooseThreshold, int clashCallSeconds, Integer turnTimeoutSeconds) {
+        this(maxRounds, chooseThreshold, clashCallSeconds, turnTimeoutSeconds, 0);
+    }
 
     /** @throws IllegalArgumentException with a message fit for an API error, naming the offending setting */
     public GameSettings {
+        requireRange("resultHoldSeconds", resultHoldSeconds, MIN_RESULT_HOLD_SECONDS, MAX_RESULT_HOLD_SECONDS);
         requireRange("maxRounds", maxRounds, MIN_MAX_ROUNDS, MAX_MAX_ROUNDS);
         requireRange("chooseThreshold", chooseThreshold, MIN_CHOOSE_THRESHOLD, MAX_CHOOSE_THRESHOLD);
         requireRange("clashCallSeconds", clashCallSeconds, MIN_CLASH_CALL_SECONDS, MAX_CLASH_CALL_SECONDS);
@@ -35,17 +48,23 @@ public record GameSettings(int maxRounds, int chooseThreshold, int clashCallSeco
     }
 
     public static GameSettings defaults() {
-        return new GameSettings(DEFAULT_MAX_ROUNDS, DEFAULT_CHOOSE_THRESHOLD, DEFAULT_CLASH_CALL_SECONDS, null);
+        return new GameSettings(DEFAULT_MAX_ROUNDS, DEFAULT_CHOOSE_THRESHOLD, DEFAULT_CLASH_CALL_SECONDS, null, DEFAULT_RESULT_HOLD_SECONDS);
     }
 
     /** The host's overrides on top of {@code defaults}: a null override keeps the default (turnTimeoutSeconds: null = the default, which may itself be "none"). */
     public static GameSettings resolve(Integer maxRounds, Integer chooseThreshold, Integer clashCallSeconds,
                                        Integer turnTimeoutSeconds, GameSettings defaults) {
+        return resolve(maxRounds, chooseThreshold, clashCallSeconds, turnTimeoutSeconds, null, defaults);
+    }
+
+    public static GameSettings resolve(Integer maxRounds, Integer chooseThreshold, Integer clashCallSeconds,
+                                       Integer turnTimeoutSeconds, Integer resultHoldSeconds, GameSettings defaults) {
         return new GameSettings(
                 maxRounds != null ? maxRounds : defaults.maxRounds(),
                 chooseThreshold != null ? chooseThreshold : defaults.chooseThreshold(),
                 clashCallSeconds != null ? clashCallSeconds : defaults.clashCallSeconds(),
-                turnTimeoutSeconds != null ? turnTimeoutSeconds : defaults.turnTimeoutSeconds());
+                turnTimeoutSeconds != null ? turnTimeoutSeconds : defaults.turnTimeoutSeconds(),
+                resultHoldSeconds != null ? resultHoldSeconds : defaults.resultHoldSeconds());
     }
 
     /** True when a player holding {@code handSize} cards may CHOOSE (2 ≤ cards ≤ threshold). */
