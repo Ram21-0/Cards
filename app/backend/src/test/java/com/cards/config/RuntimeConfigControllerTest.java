@@ -20,7 +20,7 @@ class RuntimeConfigControllerTest {
 
     @Nested
     @WebMvcTest(controllers = RuntimeConfigController.class)
-    @Import({SecurityConfig.class, SessionCookies.class, ClockConfig.class})
+    @Import({SecurityConfig.class, SessionCookies.class, ClockConfig.class, com.cards.admin.AdminAccess.class})
     @TestPropertySource(properties = "app.google-client-id=abc-123.apps.googleusercontent.com")
     class WithClientId {
         @Autowired MockMvc mvc;
@@ -38,7 +38,7 @@ class RuntimeConfigControllerTest {
 
     @Nested
     @WebMvcTest(controllers = RuntimeConfigController.class)
-    @Import({SecurityConfig.class, SessionCookies.class, ClockConfig.class})
+    @Import({SecurityConfig.class, SessionCookies.class, ClockConfig.class, com.cards.admin.AdminAccess.class})
     @TestPropertySource(properties = "app.google-client-id=")
     class WithoutClientId {
         @Autowired MockMvc mvc;
@@ -54,7 +54,7 @@ class RuntimeConfigControllerTest {
 
     @Nested
     @WebMvcTest(controllers = RuntimeConfigController.class)
-    @Import({SecurityConfig.class, SessionCookies.class, ClockConfig.class})
+    @Import({SecurityConfig.class, SessionCookies.class, ClockConfig.class, com.cards.admin.AdminAccess.class})
     @TestPropertySource(properties = "app.google-client-id=evil\"; alert(1); //")
     class WithHostileValue {
         @Autowired MockMvc mvc;

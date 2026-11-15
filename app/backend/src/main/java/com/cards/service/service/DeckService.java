@@ -27,6 +27,7 @@ public class DeckService {
     public Deck get(UUID id) {
         return decks.findById(id)
                 .filter(d -> d.visibility() != Visibility.PRIVATE)
+                .filter(Deck::playable)
                 .orElseThrow(() -> new NotFoundException("Deck " + id + " not found"));
     }
 

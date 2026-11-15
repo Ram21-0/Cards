@@ -1,5 +1,6 @@
 package com.cards.service.service;
 
+import com.cards.admin.AdminAccess;
 import com.cards.common.ConflictException;
 import com.cards.common.NotFoundException;
 import com.cards.common.Player;
@@ -46,11 +47,12 @@ public class AuthService {
 
     /** Local development only (guarded by app.dev-login.enabled): sign in as a username, creating it if needed. */
     @Transactional
-    public Login devLogin(String rawUsername) {
+    public Login devLogin(String rawUsername, boolean admin) {
         String username = Usernames.normalize(rawUsername);
         Player player = players.findByUsername(username)
                 .or(() -> players.insertDev(username))
                 .orElseThrow(() -> new ConflictException("Username already taken"));
+        if (admin) player = players.updateEmail(player.id(), AdminAccess.DEV_ADMIN_EMAIL).orElse(player);      // dev-login only: see AdminAccess
         return new Login(player, sessions.create(player.id()));
     }
 

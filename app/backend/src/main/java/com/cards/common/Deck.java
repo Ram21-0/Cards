@@ -20,8 +20,14 @@ public class Deck {
     private final Visibility visibility;
     private final Integer cardCount;                // number of cards in the deck (null when not loaded)
     private final List<StatDefinition> stats;       // ordered by displayOrder
+    private final Boolean live;                     // null = live; false = created by an approved request and not published yet
     private final Instant createdAt;
     private final Instant updatedAt;
+
+    /** Can this deck be listed and played? Not while an approved request still waits for its stats, and never without stats. */
+    public boolean playable() {
+        return (live == null || live) && (stats == null || !stats.isEmpty());
+    }
 
     public StatDefinition statDefinition(String key) {
         return stats.stream()

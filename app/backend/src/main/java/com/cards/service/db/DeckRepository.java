@@ -27,6 +27,7 @@ public class DeckRepository {
             .description(rs.getString("description"))
             .visibility(Visibility.get(rs.getInt("visibility")))
             .cardCount(rs.getInt("card_count"))
+            .live(rs.getBoolean("live"))
             .createdAt(rs.getTimestamp("created_at").toInstant())
             .updatedAt(rs.getTimestamp("updated_at").toInstant())
             .build();
@@ -44,13 +45,19 @@ public class DeckRepository {
             .build();
 
     public List<Deck> findPublic() {
-        return jdbc.query(CARD_COUNT_SELECT + " where d.visibility = ? order by d.name", DECK, Visibility.PUBLIC.dbVal())
+        return jdbc.query(CARD_COUNT_SELECT + " where d.visibility = ? and d.live and exists (select 1 from deck_stats s where s.deck_id = d.id) order by d.name", DECK, Visibility.PUBLIC.dbVal())
                 .stream().map(this::withStats).toList();
     }
 
     public Optional<Deck> findById(UUID id) {
         return jdbc.query(CARD_COUNT_SELECT + " where d.id = ?", DECK, id)
                 .stream().findFirst().map(this::withStats);
+    }
+
+    /** An approved request's deck: owned by the requester, PRIVATE and NOT live (no stats yet, so it is never listed or playable). */
+    public UUID insertNotLive(UUID ownerId, String name, String description) {
+        return jdbc.queryForObject("insert into decks (name, description, visibility, owner_id, live) values (?, ?, ?, ?, false) returning id",
+                UUID.class, name, description, Visibility.PRIVATE.dbVal(), ownerId);
     }
 
     private Deck withStats(Deck deck) {

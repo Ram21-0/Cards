@@ -131,7 +131,7 @@ class AuthServiceTest {
         Player existing = Player.builder().id(ID).username("ann").build();
         when(players.findByUsername("ann")).thenReturn(Optional.of(existing));
         when(sessions.create(ID)).thenReturn(new SessionService.NewSession("t", clock.instant()));
-        assertEquals(existing, service.devLogin("  ANN ").player());
+        assertEquals(existing, service.devLogin("  ANN ", false).player());
         verify(players, never()).insertDev(anyString());
     }
 
@@ -141,12 +141,22 @@ class AuthServiceTest {
         when(players.findByUsername("bob")).thenReturn(Optional.empty());
         when(players.insertDev("bob")).thenReturn(Optional.of(created));
         when(sessions.create(ID)).thenReturn(new SessionService.NewSession("t", clock.instant()));
-        assertEquals(created, service.devLogin("bob").player());
+        assertEquals(created, service.devLogin("bob", false).player());
+    }
+
+    @Test
+    void devLoginAsAdminGivesTheDevAdminEmail() {
+        Player plain = Player.builder().id(ID).username("boss").build();
+        Player admin = Player.builder().id(ID).username("boss").email(com.cards.admin.AdminAccess.DEV_ADMIN_EMAIL).build();
+        when(players.findByUsername("boss")).thenReturn(Optional.of(plain));
+        when(players.updateEmail(ID, com.cards.admin.AdminAccess.DEV_ADMIN_EMAIL)).thenReturn(Optional.of(admin));
+        when(sessions.create(ID)).thenReturn(new SessionService.NewSession("t", clock.instant()));
+        assertEquals(admin, service.devLogin("boss", true).player());
     }
 
     @Test
     void devLoginValidatesTheUsername() {
-        assertThrows(BadRequestException.class, () -> service.devLogin("not valid!"));
+        assertThrows(BadRequestException.class, () -> service.devLogin("not valid!", false));
     }
 
     // ------------------------------------------------------------ username

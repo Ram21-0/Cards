@@ -38,6 +38,15 @@ app:
   rate-limit:
     actions: 30                               # lobby/play requests per player ...
     window-seconds: 10                        # ... per this many seconds
+  admin:
+    emails: ${ADMIN_EMAILS:}                  # comma-separated Google emails that are admins (empty = nobody). Checked on every request, never stored.
+    notify-to: ${ADMIN_NOTIFY_TO:${ADMIN_EMAILS:}}   # who is mailed about new deck requests
+  email:
+    api-key: ${EMAIL_API_KEY:}                # Resend API key; with EMAIL_FROM set, mail is sent, otherwise it is only logged
+    from: ${EMAIL_FROM:}                      # e.g. "Cards <cards@your-domain>" (a sender verified in Resend)
+  limits:
+    api-body-bytes: 65536
+    admin-body-bytes: 2097152
   dev-login:
     enabled: false                            # POST /api/dev/login exists only where this is true (local/application.yml)
 

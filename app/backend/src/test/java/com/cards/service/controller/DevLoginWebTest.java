@@ -1,5 +1,6 @@
 package com.cards.service.controller;
 
+import com.cards.admin.AdminAccess;
 import com.cards.common.Player;
 import com.cards.config.ClockConfig;
 import com.cards.config.SecurityConfig;
@@ -37,14 +38,24 @@ class DevLoginWebTest {
         @Autowired MockMvc mvc;
         @MockitoBean AuthService auth;
         @MockitoBean SessionService sessions;
+        @MockitoBean AdminAccess adminAccess;
 
         @Test
         void signsInWithoutGoogleAndSetsTheCookie() throws Exception {
             Player ann = Player.builder().id(UUID.randomUUID()).username("ann").build();
-            when(auth.devLogin("ann")).thenReturn(new AuthService.Login(ann, new SessionService.NewSession("dev-token", Instant.now().plusSeconds(60))));
+            when(auth.devLogin("ann", false)).thenReturn(new AuthService.Login(ann, new SessionService.NewSession("dev-token", Instant.now().plusSeconds(60))));
             MvcResult r = mvc.perform(post("/api/dev/login").contentType(MediaType.APPLICATION_JSON).content("{\"username\":\"ann\"}"))
                     .andExpect(status().isOk()).andExpect(jsonPath("$.username").value("ann")).andReturn();
             assertTrue(r.getResponse().getHeader("Set-Cookie").startsWith("session=dev-token"));
+        }
+
+        @Test
+        void adminTrueSignsInAsTheDevAdmin() throws Exception {
+            Player boss = Player.builder().id(UUID.randomUUID()).username("boss").email(AdminAccess.DEV_ADMIN_EMAIL).build();
+            when(auth.devLogin("boss", true)).thenReturn(new AuthService.Login(boss, new SessionService.NewSession("dev-token", Instant.now().plusSeconds(60))));
+            when(adminAccess.isAdmin(boss)).thenReturn(true);
+            mvc.perform(post("/api/dev/login?admin=true").contentType(MediaType.APPLICATION_JSON).content("{\"username\":\"boss\"}"))
+                    .andExpect(status().isOk()).andExpect(jsonPath("$.isAdmin").value(true));
         }
     }
 
@@ -56,6 +67,7 @@ class DevLoginWebTest {
         @Autowired MockMvc mvc;
         @MockitoBean AuthService auth;
         @MockitoBean SessionService sessions;
+        @MockitoBean AdminAccess adminAccess;
 
         @Test
         void theEndpointDoesNotExist() throws Exception {

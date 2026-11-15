@@ -148,6 +148,10 @@ These are the real names from `application.yml` and `prod/application.yml`. Spri
 | `DATABASE_URL` | `postgresql://app_prod:…@ep-xxxx.ap-southeast-1.aws.neon.tech/neondb?sslmode=require` | **YES** | **yes** | Neon → prod branch → Connect → pooling OFF. App fails to start without it. |
 | `GOOGLE_CLIENT_ID` | `1234567890-abc….apps.googleusercontent.com` | no (public id; keep per-env) | yes for sign-in | Google Cloud → Credentials → your OAuth Web client. Empty = sign-in answers 503 and `/config.js` has an empty id. Verifier rejects tokens for any other audience. |
 | `FRONTEND_ORIGIN` | `https://cards.onrender.com` | no | **yes** | The exact public origin: scheme + host, no path, no trailing slash. Used for CORS allow-list (`app.cors.allowed-origins`) and join links (`app.frontend-base-url`). The app fails to start if unset in prod. Update it when you add a custom domain. |
+| `ADMIN_EMAILS` | `you@gmail.com` | no (but personal) | no | Comma-separated Google emails that are **admins** (see `docs/deck-requests/PLAN.md`). Checked on every request against the verified Google email; empty = nobody is an admin. Remove an address to revoke access. |
+| `ADMIN_NOTIFY_TO` | `you@gmail.com` | no | no | Who is emailed about new deck requests. Defaults to `ADMIN_EMAILS`. |
+| `EMAIL_API_KEY` | `re_…` | **yes** | no | Resend API key (HTTPS API, not SMTP: free Render blocks SMTP). Without both this and `EMAIL_FROM` mails are only written to the log. |
+| `EMAIL_FROM` | `Cards <cards@your-domain>` | no | no | The sender, verified in Resend. |
 | `PORT` | (Render sets `10000`) | no | no | Tomcat listens on `${PORT:8080}`. Do not set it on Render; the platform injects it. |
 | `JAVA_TOOL_OPTIONS` | see section 4.3 | no | no | Baked into the image; override only to tune memory. |
 | `APP_SESSION_TTL_DAYS` | `30` | no | no | `app.session.ttl-days`, default 30. Lower for stricter security. |
