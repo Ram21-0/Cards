@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { wsUrl, backoffDelay, skewMs, initialLive, applyMessage, seatName, seatRows, phaseInfo, secondsLeft, createLiveClient, PING_MS,
-  foldRounds, eventText, feedLines, callCard, clashInfo, ordinal, overFromGame, overSummary, pileList, pileTitle } from '../js/live.js';
+  foldRounds, FEED_MAX, eventText, feedLines, callCard, clashInfo, ordinal, overFromGame, overSummary, pileList, pileTitle } from '../js/live.js';
 
 const game = (over = {}) => ({
   id: 'g1', joinCode: 'K7Q2XM', status: 'WAITING', maxPlayers: 4, deck: { id: 'd', name: 'Wrestling' }, hostSeat: 1,
@@ -297,8 +297,9 @@ test('applyMessage: events build the feed (capped) and the last round; gameOver 
   s = applyMessage(s, { type: 'events', events: [{ type: 'roundStarted', round: 1, caller: 1, seats: [1, 2] }, { type: 'statCalled', seat: 1, stat: 'rank', auto: false }, { type: 'roundWon', seat: 1, cardsWon: 2 }] });
   assert.equal(s.feed.length, 3);
   assert.equal(s.lastRound.winner, 1);
-  for (let i = 0; i < 20; i++) s = applyMessage(s, { type: 'events', events: [{ type: 'cardChosen', seat: 2, auto: false }] });
-  assert.equal(s.feed.length, 12);                     // capped, newest kept
+  for (let i = 0; i < FEED_MAX + 20; i++) s = applyMessage(s, { type: 'events', events: [{ type: 'cardChosen', seat: 2, auto: false }] });
+  assert.equal(s.feed.length, FEED_MAX);               // capped, newest kept
+  assert.equal(s.feedTotal, 3 + FEED_MAX + 20);        // ... but the running count keeps going
   s = applyMessage(s, { type: 'gameOver', mySeat: 1, placements: { 1: 1, 2: 2 }, endedByRoundCap: true, game: game({ status: 'FINISHED' }) });
   assert.deepEqual(s.over, { placements: { 1: 1, 2: 2 }, endedByRoundCap: true });
   assert.equal(s.game.status, 'FINISHED');

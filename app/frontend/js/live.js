@@ -28,13 +28,14 @@ export const skewMs = (serverTime, nowMs) => {
 export const initialLive = () => ({
   game: null, mySeat: null, view: null, skewMs: 0, started: false, lastError: null,
   feed: [],            // the most recent game events (raw), newest last
+  feedTotal: 0,        // how many events there have been in all (the log button shows a dot when this grew while the log was closed)
   current: null,       // the round being played, folded from events
   lastRound: null,     // the last finished round (what to show on the table)
   over: null,          // { placements, endedByRoundCap } once the game has ended
   finishedRounds: [],  // rounds that ended in the last `events` message (a CPU-only stretch can finish several)
 });
 
-const FEED_MAX = 12;
+export const FEED_MAX = 150;
 
 /** Folds one server message into the client state. Pure: returns a new state. */
 export function applyMessage(state, msg, nowMs = Date.now()) {
@@ -58,6 +59,7 @@ export function applyMessage(state, msg, nowMs = Date.now()) {
     case 'events': {
       const events = msg.events ?? [];
       next.feed = [...state.feed, ...events].slice(-FEED_MAX);
+      next.feedTotal = (state.feedTotal ?? 0) + events.length;
       const folded = foldRounds({ current: state.current, lastRound: state.lastRound }, events);
       next.current = folded.current;
       next.lastRound = folded.lastRound;
