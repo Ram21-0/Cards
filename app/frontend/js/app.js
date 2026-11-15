@@ -600,6 +600,10 @@ function onLiveMessage(ctx, msg) {
     }
     return setGame(ctx, ctx.rt.game);
   }
+  if (msg.type === 'options') {                                 // keep the game's rules current: the result hold length, the timers
+    ctx.game = { ...ctx.game, options: { ...ctx.game.options, ...msg.options } };
+    return ctx.paint();
+  }
   if (msg.type !== 'lobby' && msg.type !== 'started') return;
   if (ctx.rt.mySeat == null && had) {                          // we were taken off the seat list
     toast('You are no longer in this game');

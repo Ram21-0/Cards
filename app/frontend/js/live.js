@@ -71,6 +71,9 @@ export function applyMessage(state, msg, nowMs = Date.now()) {
       next.game = msg.game ?? state.game;
       next.mySeat = msg.mySeat ?? state.mySeat;
       break;
+    case 'options':                                                // the host changed a game option (e.g. how long a round result stays up)
+      if (state.game && msg.options) next.game = { ...state.game, options: { ...state.game.options, ...msg.options } };
+      break;
     case 'error':
       next.lastError = msg.error ?? 'Unknown error';
       break;

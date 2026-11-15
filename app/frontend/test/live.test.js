@@ -455,3 +455,12 @@ test('applyMessage exposes the rounds finished by the latest events message only
   s = applyMessage(s, { type: 'events', events: [{ type: 'cardChosen', seat: 2, auto: false }] });
   assert.equal(s.finishedRounds.length, 0);
 });
+
+test('applyMessage: an options message updates the game rules (the host changed the result hold)', () => {
+  let s = applyMessage(initialLive(), { type: 'lobby', mySeat: 1, game: game({ status: 'IN_PROGRESS', options: { maxRounds: 200, resultHoldSeconds: 6, clashCallSeconds: 5 } }) });
+  s = applyMessage(s, { type: 'options', serverTime: '2026-11-08T10:00:00Z', options: { maxRounds: 200, resultHoldSeconds: 12, clashCallSeconds: 5 } });
+  assert.equal(s.game.options.resultHoldSeconds, 12);
+  assert.equal(s.game.options.clashCallSeconds, 5);
+  assert.equal(s.game.status, 'IN_PROGRESS');                    // nothing else changes
+  assert.equal(applyMessage(initialLive(), { type: 'options', options: { resultHoldSeconds: 3 } }).game, null);   // no game yet: nothing to update
+});
