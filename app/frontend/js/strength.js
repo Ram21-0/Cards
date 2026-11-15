@@ -71,3 +71,33 @@ export function bigCardNotices({ winnerSeat, mySeat, reveals, strong }) {
 
 /** "You won Atlas Wolfe" / "You lost Iron Duke". */
 export const bigCardText = (n) => `${n.kind === 'won' ? 'You won' : 'You lost'} ${n.name}`;
+
+/** "Big card: you won Atlas Wolfe": the chip on the round result. */
+export const bigCardChip = (n) => `Big card: you ${n.kind === 'won' ? 'won' : 'lost'} ${n.name}`;
+
+/**
+ * The stat a card is best at, judged against the rest of the deck (the share of other cards it beats, ties half).
+ * Used to show something useful on the tiles when the caller picks a card before the stat is known.
+ * Returns { key, label, display } or null. A stat called "rank" is skipped unless it is the only one.
+ */
+export function bestStat(card, cards, stats) {
+  const list = stats.filter((s) => s.key !== 'rank');
+  const use = list.length ? list : stats;
+  let best = null;
+  for (const s of use) {
+    const x = card.stats?.[s.key]?.value;
+    if (x == null) continue;
+    let beaten = 0;
+    let n = 0;
+    for (const o of cards) {
+      if (o.id === card.id || o.stats?.[s.key] == null) continue;
+      n += 1;
+      const y = o.stats[s.key].value;
+      if (x === y) beaten += 0.5;
+      else if ((x > y) === s.higherWins) beaten += 1;
+    }
+    const share = n ? beaten / n : 0;
+    if (!best || share > best.share) best = { key: s.key, label: s.label, display: card.stats[s.key].display ?? String(x), share };
+  }
+  return best && { key: best.key, label: best.label, display: best.display };
+}

@@ -71,6 +71,14 @@ public class LivePlay {
         });
     }
 
+    /** The host changed the result hold: apply it to the running engine (also to a hold in progress) and tell everyone. */
+    public void setResultHold(LiveGame live, int seconds) {
+        live.withLock(() -> {
+            afterChange(live, live.engine().setResultHoldSeconds(seconds));
+            return null;
+        });
+    }
+
     // ------------------------------------------------------------------------------------------ lifecycle
 
     /** The game has just started: tell everyone ({@code started}, the opening events, their views) and start the clocks. */
@@ -114,6 +122,7 @@ public class LivePlay {
             GameEngine engine = live.engine();
             Instant now = clock.instant();
             List<GameEvent> events = new ArrayList<>(engine.tick(now));
+            trackActing(live);                                                    // a new turn may have begun: its grace starts now
             for (int seat : graceDueSeats(live, now)) events.addAll(engine.timeoutSeat(seat));
             afterChange(live, events);
             return null;

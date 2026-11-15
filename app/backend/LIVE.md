@@ -24,6 +24,7 @@ All return the game (`GameResponse`) on success unless noted. `{code}` is the jo
 | `POST /api/games/{code}/cpu` body `{"difficulty":"easy\|medium\|hard\|extreme"}` | host | adds a CPU in the lowest free seat |
 | `DELETE /api/games/{code}/seats/{seat}` | host | removes a **CPU** seat only |
 | `POST /api/games/{code}/leave` | seated human | leaves a WAITING game. Host leaving passes host to the lowest-seated human; if no human is left the game becomes `ABANDONED` |
+| `PATCH /api/games/{code}/options` body `{"resultHoldSeconds": 0-20}` | host | changes a game option at any time while the game is `WAITING` or `IN_PROGRESS` (409 once finished/abandoned). Only `resultHoldSeconds` for now; more fields may be added later and only the fields present change. `400` outside 0–20 or when the field is missing, `403` not the host, `404` unknown game. Answers with the game body (`options.resultHoldSeconds` is the new value) |
 | `POST /api/games/{code}/start` | host | needs ≥ 2 seats; WAITING → IN_PROGRESS; seats are renumbered 1..n (gaps closed) |
 
 Errors: `400` bad input (unknown difficulty, removing a human seat); `403` not the host; `404` unknown game / empty seat;
@@ -56,7 +57,7 @@ A late race loser in a clash simply gets `409` (the stat was already set).
     {"seat": 1, "kind": "HUMAN", "username": "ann", "difficulty": null, "placement": null},
     {"seat": 3, "kind": "CPU",   "username": null,  "difficulty": "HARD", "placement": null}
   ],
-  "options": {"maxRounds": 200, "chooseThreshold": 8, "clashCallSeconds": 5, "turnTimeoutSeconds": null},
+  "options": {"maxRounds": 200, "chooseThreshold": 8, "clashCallSeconds": 5, "turnTimeoutSeconds": null, "resultHoldSeconds": 6},
   "hostSeat": 1
 }
 ```
@@ -105,6 +106,14 @@ After the game has started a reconnecting client also gets a `lobby` first (stat
 
 `mySeat` is yours (or `null` if you were removed). If you leave the game the server closes your socket.
 
+**`options`**: the host changed an option. Sent to everyone connected, in the lobby and during the game. The same values are always in `game.options` of every `lobby` message, so a reconnecting client sees the current value. Show the value to all players and the control only to the host (`mySeat === game.hostSeat`; when the host leaves the lobby the role passes to the next human and the `lobby` message says so).
+
+```json
+{"type":"options","serverTime":"…","options":{"maxRounds":200,"chooseThreshold":3,"clashCallSeconds":5,"turnTimeoutSeconds":null,"resultHoldSeconds":12}}
+```
+
+If the game is showing a round result when the value changes, the hold's deadline is recomputed (see below) and everyone receives a fresh `view` with the new `deadline` (and, if the hold ended at once, the `events` of the next round) **before** the `options` message.
+
 **`started`**: the host started the game; `game.seats` are now numbered 1..n, `status` is `IN_PROGRESS`. A `view` follows immediately.
 
 ```json
@@ -130,7 +139,9 @@ After the game has started a reconnecting client also gets a `lobby` first (stat
   (which includes a card currently in play). A card, its id or its stat values are never sent to anyone but its holder until the
   engine reveals it (stage 2 `events`). This is covered by tests.
 * `phase` is one of `AWAIT_CHOOSE_CALLER`, `AWAIT_CALL`, `AWAIT_CHOOSE_OTHERS`, `RESOLVE`, `CLASH_AWAIT_CALL`, `CLASH_AWAIT_CHOOSE`,
-  `CLASH_RESOLVE`, `ROUND_DONE`, `GAME_OVER` (the RESOLVE/DONE ones are transient; you will normally see the other three kinds).
+  `CLASH_RESOLVE`, `ROUND_DONE`, `ROUND_RESULT`, `GAME_OVER` (RESOLVE / CLASH_RESOLVE / ROUND_DONE are transient and never seen). **`ROUND_RESULT`** is the
+  hold between rounds: `deadline` is when the next round starts, `canCall`/`canChoose` are false for everyone, and the view still shows the
+  finished round (`stat`, `clashLevel`, `contenders`).
   `callerSeat` is the caller of this round. `stat` is the key of the stat in play (null until called). `clashLevel` is 0 in a normal round,
   1, 2 … in repeated clashes; `potSize` counts cards waiting in the pot; `contenders` are the seats still in the round or clash.
 * `canCall` / `canChoose` say what *you* may do now. `deadline` (ISO-8601, or `null`) is when the server will act by itself
@@ -183,6 +194,15 @@ the game. After this the game leaves server memory: reconnecting gets a `lobby` 
 
 ## Timers and absent players (all server side)
 
+* **Round result hold** (`options.resultHoldSeconds`, default 6, 0–20, 0 = none; settable in `POST /api/games` `options`): after every round that does
+  not end the game the server enters phase `ROUND_RESULT` with `view.deadline` = the end of the hold: 6 s after a normal round, **9 s (+3) after a
+  round with a clash or an elimination**. The events of the round (`revealed`, `roundWon`, `playerEliminated`…) arrive immediately; the next
+  `roundStarted` event and its view come only when the hold ends. During the hold `call`/`choose` answer `409` ("The round result is on show…"),
+  CPUs do nothing, an absent player's grace has not started, and the next round's turn timer / CPU delays start when the hold ends. The round that
+  ends the game has no hold (`gameOver` follows at once).
+  The host can change it at any time (`PATCH …/options`): it also applies to a hold already on show, whose deadline becomes *(start of the hold)* + the new value
+  (+3 if that round had a clash or an elimination). Lowering can end the hold early (0 ends it immediately); raising extends it. A deadline that would be in the past
+  means "now", and the next round's turn timer starts then.
 * **Turn timeout** (`options.turnTimeoutSeconds`, `null` = none): when it runs out the server plays the move (random stat, or the top card)
   and tells everyone with `auto: true` on the event.
 * **Clash race** (`options.clashCallSeconds`, default 5): the first `call` wins; if nobody calls in time the server picks a random stat

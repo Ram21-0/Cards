@@ -135,6 +135,70 @@ class GameServiceTest {
     }
 
     @Test
+    void theResultHoldOptionIsValidatedAndPassedOn() {
+        when(decks.get(DECK_ID)).thenReturn(deck(54));
+        Game created = game("K7Q2XM", 4, GameStatus.WAITING);
+        when(games.insertIfCodeFree(anyString(), eq(DECK_ID), eq(ANN.id()), eq(4), any())).thenReturn(Optional.of(created));
+        when(games.findSeats(created.id())).thenReturn(List.of(seat(1, "ann")));
+
+        assertEquals("resultHoldSeconds must be between 0 and 20",
+                assertThrows(BadRequestException.class, () -> service.create(DECK_ID, 4, ANN, new GameOptions(null, null, null, null, 21))).getMessage());
+        service.create(DECK_ID, 4, ANN, new GameOptions(null, null, null, null, 9));
+        service.create(DECK_ID, 4, ANN, GameOptions.NONE);
+
+        org.mockito.ArgumentCaptor<com.cards.game.GameSettings> settings = org.mockito.ArgumentCaptor.forClass(com.cards.game.GameSettings.class);
+        verify(games, org.mockito.Mockito.times(2)).insertIfCodeFree(anyString(), eq(DECK_ID), eq(ANN.id()), eq(4), settings.capture());
+        assertEquals(9, settings.getAllValues().get(0).resultHoldSeconds(), "the host's value is used");
+        assertEquals(0, settings.getAllValues().get(1).resultHoldSeconds(), "no option = this fixture's default (4-arg settings have no hold)");
+    }
+
+    // ---------------------------------------------------------------- the host changes options during the game
+
+    private Game optionsGame(GameStatus status) {
+        Game g = game("K7Q2XM", 4, status).toBuilder().hostId(ANN.id()).build();
+        when(games.findByJoinCodeForUpdate("K7Q2XM")).thenReturn(Optional.of(g));
+        when(deckRepository.findById(g.deckId())).thenReturn(Optional.of(deck(54)));
+        when(games.findSeats(g.id())).thenReturn(List.of(seat(1, "ann")));
+        return g;
+    }
+
+    @Test
+    void theHostChangesTheResultHoldInTheLobbyAndDuringAGame() {
+        for (GameStatus status : new GameStatus[]{GameStatus.WAITING, GameStatus.IN_PROGRESS}) {
+            Game g = optionsGame(status);
+            GameDetails d = service.setOptions("K7Q2XM", ANN, new GameOptions(null, null, null, null, 12));
+            verify(games).setResultHold(g.id(), 12);
+            assertEquals(12, d.game().resultHoldSeconds());
+            org.mockito.Mockito.clearInvocations(games);
+        }
+    }
+
+    @Test
+    void onlyTheHostMayChangeOptionsAndOnlyInAnOpenGame() {
+        optionsGame(GameStatus.IN_PROGRESS);
+        assertThrows(com.cards.common.ForbiddenException.class, () -> service.setOptions("K7Q2XM", BOB, new GameOptions(null, null, null, null, 3)));
+        optionsGame(GameStatus.FINISHED);
+        assertThrows(ConflictException.class, () -> service.setOptions("K7Q2XM", ANN, new GameOptions(null, null, null, null, 3)));
+        optionsGame(GameStatus.ABANDONED);
+        assertThrows(ConflictException.class, () -> service.setOptions("K7Q2XM", ANN, new GameOptions(null, null, null, null, 3)));
+        when(games.findByJoinCodeForUpdate("NOPE12")).thenReturn(Optional.empty());
+        assertThrows(NotFoundException.class, () -> service.setOptions("NOPE12", ANN, new GameOptions(null, null, null, null, 3)));
+        verify(games, never()).setResultHold(any(), anyInt());
+    }
+
+    @Test
+    void optionValuesAreValidated() {
+        optionsGame(GameStatus.WAITING);
+        for (int bad : new int[]{-1, 21}) {
+            assertEquals("resultHoldSeconds must be between 0 and 20",
+                    assertThrows(BadRequestException.class, () -> service.setOptions("K7Q2XM", ANN, new GameOptions(null, null, null, null, bad))).getMessage());
+        }
+        assertEquals("resultHoldSeconds is required",
+                assertThrows(BadRequestException.class, () -> service.setOptions("K7Q2XM", ANN, GameOptions.NONE)).getMessage());
+        verify(games, never()).setResultHold(any(), anyInt());
+    }
+
+    @Test
     void retriesWithAnotherCodeOnCollision() {
         when(decks.get(DECK_ID)).thenReturn(deck(54));
         when(games.insertIfCodeFree(anyString(), any(), any(), anyInt(), any()))

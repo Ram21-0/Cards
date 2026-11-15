@@ -13,6 +13,7 @@ import com.cards.game.GameSettings;
 import com.cards.live.LiveTestKit.FakeSocket;
 import com.cards.service.db.GameRepository;
 import com.cards.service.service.GameDetails;
+import com.cards.service.service.GameOptions;
 import com.cards.service.service.GameService;
 import com.fasterxml.jackson.databind.JsonNode;
 import org.junit.jupiter.api.Test;
@@ -237,6 +238,110 @@ class LivePlayTest {
         JsonNode call = events(forAnn).stream().filter(e -> "statCalled".equals(e.get("type").asText())).findFirst().orElseThrow();
         assertTrue(call.get("auto").asBoolean());
         assertEquals(eventTypes(forAnn), eventTypes(forBob));
+    }
+
+    @Test
+    void theRoundResultIsHeldThenTheNextRoundIsPushedAtTheDeadline() throws Exception {
+        startGame(new GameSettings(500, 0, 5, 10, 6), List.of(List.of(card(1, 1, 3, 1), card(1, 2, 5, 5)), List.of(card(2, 1, 9, 3), card(2, 2, 4, 4))), true, true);
+        java.time.Instant t0 = clock.instant();
+
+        service.call(CODE, ann, "power");
+
+        JsonNode view = lastView(forBob);
+        assertEquals("ROUND_RESULT", view.get("phase").asText());
+        assertEquals(t0.plusSeconds(6), java.time.Instant.parse(view.get("deadline").asText()));
+        assertFalse(view.get("canCall").asBoolean() || lastView(forAnn).get("canCall").asBoolean());
+        assertFalse(eventTypes(forBob).contains("roundStarted") && eventTypes(forBob).lastIndexOf("roundStarted") > 0, "no next round yet");
+        assertThrows(ConflictException.class, () -> service.call(CODE, bob, "power"), "calls are refused during the hold (409)");
+
+        scheduler.advance(Duration.ofSeconds(5));
+        assertEquals("ROUND_RESULT", lastView(forBob).get("phase").asText());
+        scheduler.advance(Duration.ofSeconds(1));
+
+        JsonNode next = lastView(forBob);
+        assertEquals("AWAIT_CALL", next.get("phase").asText());
+        assertEquals(2, next.get("round").asInt());
+        assertEquals(t0.plusSeconds(16), java.time.Instant.parse(next.get("deadline").asText()), "the turn timer starts when the hold ends");
+        assertEquals(2, events(forBob).stream().filter(e -> "roundStarted".equals(e.get("type").asText())).count());
+    }
+
+    // ---------------------------------------------------------------- the host changes the hold during the game
+
+    private GameDetails withHold(int seconds) {
+        GameDetails running = details(GameStatus.IN_PROGRESS, ann, List.of(human(1, ann), human(2, bob)));
+        return new GameDetails(running.game().toBuilder().resultHoldSeconds(seconds).build(), running.deck(), running.seats());
+    }
+
+    private void hostSets(int seconds) {
+        GameOptions o = new GameOptions(null, null, null, null, seconds);
+        when(games.setOptions(CODE, ann, o)).thenReturn(withHold(seconds));
+        service.setOptions(CODE, ann, o);
+    }
+
+    @Test
+    void loweringTheHoldDuringARunningHoldEndsItOnTime() throws Exception {
+        startGame(new GameSettings(500, 0, 5, 10, 6), List.of(List.of(card(1, 1, 3, 1), card(1, 2, 5, 5)), List.of(card(2, 1, 9, 3), card(2, 2, 4, 4))), true, true);
+        java.time.Instant t0 = clock.instant();
+        service.call(CODE, ann, "power");
+        assertEquals("ROUND_RESULT", lastView(forBob).get("phase").asText());
+        scheduler.advance(Duration.ofSeconds(1));
+
+        hostSets(3);
+
+        assertEquals(t0.plusSeconds(3), java.time.Instant.parse(lastView(forBob).get("deadline").asText()), "the pushed view carries the new deadline");
+        scheduler.advance(Duration.ofSeconds(1));
+        assertEquals("ROUND_RESULT", lastView(forBob).get("phase").asText());
+        scheduler.advance(Duration.ofSeconds(1));
+        assertEquals("AWAIT_CALL", lastView(forBob).get("phase").asText(), "the hold ended at 3 s");
+        assertEquals(2, lastView(forBob).get("round").asInt());
+    }
+
+    @Test
+    void raisingTheHoldExtendsItAndEveryoneGetsAnOptionsMessage() throws Exception {
+        startGame(new GameSettings(500, 0, 5, null, 6), List.of(List.of(card(1, 1, 3, 1), card(1, 2, 5, 5)), List.of(card(2, 1, 9, 3), card(2, 2, 4, 4))), true, true);
+        java.time.Instant t0 = clock.instant();
+        service.call(CODE, ann, "power");
+        scheduler.advance(Duration.ofSeconds(5));
+
+        hostSets(15);
+
+        for (FakeSocket socket : List.of(forAnn, forBob)) {
+            JsonNode options = json().readTree(socket.ofType("options").get(0));
+            assertEquals(15, options.get("options").get("resultHoldSeconds").asInt());
+            assertEquals(5, options.get("options").get("clashCallSeconds").asInt());
+        }
+        assertEquals(t0.plusSeconds(15), java.time.Instant.parse(lastView(forAnn).get("deadline").asText()));
+        scheduler.advance(Duration.ofSeconds(9));                       // 14 s
+        assertEquals("ROUND_RESULT", lastView(forBob).get("phase").asText());
+        scheduler.advance(Duration.ofSeconds(1));
+        assertEquals("AWAIT_CALL", lastView(forBob).get("phase").asText());
+    }
+
+    @Test
+    void zeroEndsTheHoldImmediately() throws Exception {
+        startGame(new GameSettings(500, 0, 5, null, 6), List.of(List.of(card(1, 1, 3, 1), card(1, 2, 5, 5)), List.of(card(2, 1, 9, 3), card(2, 2, 4, 4))), true, true);
+        service.call(CODE, ann, "power");
+
+        hostSets(0);
+
+        assertEquals("AWAIT_CALL", lastView(forBob).get("phase").asText());
+        assertEquals(2, lastView(forBob).get("round").asInt());
+    }
+
+    @Test
+    void anAbsentPlayerIsNotTimedOutDuringTheHold() throws Exception {
+        startGame(new GameSettings(500, 0, 5, null, 6), List.of(List.of(card(1, 1, 3, 1), card(1, 2, 5, 5)), List.of(card(2, 1, 9, 3), card(2, 2, 4, 4))), true, false);
+        service.call(CODE, ann, "power");                         // bob wins and will call next, but he is absent
+        assertEquals("ROUND_RESULT", lastView(forAnn).get("phase").asText());
+
+        scheduler.advance(Duration.ofSeconds(5));
+        assertEquals("ROUND_RESULT", lastView(forAnn).get("phase").asText(), "still under the result: no grace for an absent player");
+        scheduler.advance(Duration.ofSeconds(1));                 // the hold ends: bob's turn begins now
+        assertEquals("AWAIT_CALL", lastView(forAnn).get("phase").asText());
+        scheduler.advance(Duration.ofSeconds(14));
+        assertEquals(1, events(forAnn).stream().filter(e -> "statCalled".equals(e.get("type").asText())).count(), "his 15 s grace counts from the turn start");
+        scheduler.advance(Duration.ofSeconds(1));
+        assertEquals(2, events(forAnn).stream().filter(e -> "statCalled".equals(e.get("type").asText())).count());
     }
 
     @Test

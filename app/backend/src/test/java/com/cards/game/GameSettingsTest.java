@@ -17,6 +17,7 @@ class GameSettingsTest {
         assertEquals(3, d.chooseThreshold());
         assertEquals(5, d.clashCallSeconds());
         assertNull(d.turnTimeoutSeconds(), "no turn limit by default");
+        assertEquals(6, d.resultHoldSeconds());
     }
 
     @Test
@@ -24,6 +25,18 @@ class GameSettingsTest {
         new GameSettings(20, 0, 2, 5);
         new GameSettings(5000, 10, 30, 120);
         new GameSettings(20, 10, 2, null);
+        new GameSettings(20, 3, 5, null, 0);
+        new GameSettings(20, 3, 5, null, 20);
+    }
+
+    @Test
+    void theResultHoldIsRangeChecked() {
+        for (int bad : new int[]{-1, 21}) {
+            IllegalArgumentException e = assertThrows(IllegalArgumentException.class, () -> new GameSettings(500, 3, 5, null, bad));
+            assertEquals("resultHoldSeconds must be between 0 and 20", e.getMessage());
+        }
+        assertEquals(0, GameSettings.resolve(null, null, null, null, 0, GameSettings.defaults()).resultHoldSeconds());
+        assertEquals(6, GameSettings.resolve(null, null, null, null, null, GameSettings.defaults()).resultHoldSeconds());
     }
 
     @Test

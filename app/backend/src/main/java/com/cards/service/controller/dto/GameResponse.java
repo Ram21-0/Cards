@@ -11,7 +11,7 @@ public record GameResponse(UUID id, String joinCode, String joinUrl, String stat
                            DeckRef deck, List<Seat> seats, Options options, Integer hostSeat) {
 
     /** The rule settings of this game (RULES.md §1); turnTimeoutSeconds is null when there is no limit. */
-    public record Options(int maxRounds, int chooseThreshold, int clashCallSeconds, Integer turnTimeoutSeconds) {
+    public record Options(int maxRounds, int chooseThreshold, int clashCallSeconds, Integer turnTimeoutSeconds, int resultHoldSeconds) {
     }
 
     public record DeckRef(UUID id, String name) {
@@ -32,7 +32,7 @@ public record GameResponse(UUID id, String joinCode, String joinUrl, String stat
                 d.game().status().name(), d.game().maxPlayers(),
                 new DeckRef(d.deck().id(), d.deck().name()),
                 d.seats().stream().map(Seat::from).toList(),
-                new Options(d.game().maxRounds(), d.game().chooseThreshold(), d.game().clashCallSeconds(), d.game().turnTimeoutSeconds()),
+                new Options(d.game().maxRounds(), d.game().chooseThreshold(), d.game().clashCallSeconds(), d.game().turnTimeoutSeconds(), d.game().resultHoldSeconds()),
                 d.seats().stream().filter(s -> s.playerId() != null && s.playerId().equals(d.game().hostId())).map(SeatInfo::seat).findFirst().orElse(null));
     }
 }

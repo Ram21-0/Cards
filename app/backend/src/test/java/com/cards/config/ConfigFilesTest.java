@@ -50,6 +50,7 @@ class ConfigFilesTest {
         assertEquals("500", p.getProperty("app.game.max-rounds"));
         assertEquals("3", p.getProperty("app.game.choose-threshold"));
         assertEquals("5", p.getProperty("app.game.clash-call-seconds"));
+        assertEquals("6", p.getProperty("app.game.result-hold-seconds"));
         assertNull(p.getProperty("app.game.turn-timeout-seconds"), "no turn limit unless configured");
 
         CpuProfiles configured = new GameConfig().cpuProfiles(
@@ -60,7 +61,7 @@ class ConfigFilesTest {
         for (DifficultyLevel level : DifficultyLevel.values()) {
             assertEquals(CpuProfiles.defaults().profile(level), configured.profile(level), level.name());
         }
-        GameSettings settings = new GameConfig().defaultGameSettings(500, 3, 5, null);
+        GameSettings settings = new GameConfig().defaultGameSettings(500, 3, 5, null, 6);
         assertEquals(GameSettings.defaults(), settings);
     }
 
@@ -70,7 +71,7 @@ class ConfigFilesTest {
                 () -> new GameConfig().cpuProfiles("random", 0, "clever", 0, "smart", 0, "counting", 0));
         assertTrue(e.getMessage().contains("clever"));
         assertThrows(IllegalArgumentException.class, () -> new GameConfig().cpuProfiles("random", 0, "smart", 1.5, "smart", 0, "counting", 0));
-        assertThrows(IllegalArgumentException.class, () -> new GameConfig().defaultGameSettings(5, 3, 5, null));
+        assertThrows(IllegalArgumentException.class, () -> new GameConfig().defaultGameSettings(5, 3, 5, null, 6));
     }
 
     @Test

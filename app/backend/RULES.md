@@ -13,6 +13,7 @@ The authoritative spec for the rules engine (pure Java, no Spring/DB code). Agre
 | `chooseThreshold` | 3 | 0–10 | A player with at most this many cards may CHOOSE (0 disables CHOOSE) |
 | `clashCallSeconds` | 5 | 2–30 | Time to call a stat in a clash |
 | `turnTimeoutSeconds` | none | 5–120 | Time for a normal call / choose; none = no limit |
+| `resultHoldSeconds` | 6 | 0–20 | How long the round result stays up before the next round starts (§2 step 8); 0 = no hold |
 
 ## 2. A normal round
 1. **Eligible players choose** (see §4): the caller first.
@@ -21,6 +22,9 @@ The authoritative spec for the rules engine (pure Java, no Spring/DB code). Agre
 4. Everyone still holding cards reveals their (chosen or top) card. The best value under the stat's `comparison_strategy` wins.
 5. **Unique best → that player wins the round:** every revealed card plus any carried pot goes to the **bottom of the winner's pile** (their own card first, then the others in seat order starting after the winner). **The winner calls next.**
 6. **Tie for best → clash (§3).**
+7. A player left with no cards is eliminated (§5); if that ends the game, or the round cap is reached (§6), the game is over **at once** (no hold).
+8. **Result hold:** otherwise the round's result stays up for `resultHoldSeconds` (phase `ROUND_RESULT`, `deadline` = when it ends), **+3 s when the round involved a clash or an elimination** (6 → 9 by default). During the hold nobody can call or choose (409), CPU seats do nothing and no turn timer or CPU delay runs; the next round (and its turn timer / CPU delays) starts only when the hold ends. `resultHoldSeconds = 0` goes straight to the next round.
+   **The host can change `resultHoldSeconds` at any time during the game** (lobby or running). It applies at once and also to a hold that is already on show: that hold's deadline becomes *(start of the hold)* + the new value (+3 s if that round had a clash or an elimination), so lowering it can end the hold early (0 ends it right now; a deadline already in the past means "now", and the next round's clocks start then) and raising it extends it.
 
 Cards are never discarded: they cycle back to the winner's pile.
 
@@ -76,7 +80,7 @@ The server never sends a card to anyone but its holder until it is revealed. A p
 - A pure state machine with injectable **random source** and **clock**.
 - **Commands:** `choose(seat, cardId)`, `call(seat, statKey)`, `tick(now)` (applies timeouts).
 - **Events returned:** `RoundStarted`, `CardChosen`, `StatCalled{seat, stat, auto}`, `Revealed{cards}`, `RoundWon{seat, cardsWon}`, `ClashStarted{tiedSeats, level, potSize}`, `PlayerEliminated{seat, placement}`, `GameOver{placements}`.
-- Phases: `AWAIT_CHOOSE_CALLER → AWAIT_CALL → AWAIT_CHOOSE_OTHERS → RESOLVE → (CLASH_AWAIT_CALL → CLASH_AWAIT_CHOOSE → CLASH_RESOLVE)* → ROUND_DONE → … → GAME_OVER`.
+- Phases: `AWAIT_CHOOSE_CALLER → AWAIT_CALL → AWAIT_CHOOSE_OTHERS → RESOLVE → (CLASH_AWAIT_CALL → CLASH_AWAIT_CHOOSE → CLASH_RESOLVE)* → ROUND_DONE → ROUND_RESULT (the hold, only when the game goes on) → AWAIT_CHOOSE_CALLER … → GAME_OVER`. `ROUND_RESULT` is observable; `RESOLVE`, `CLASH_RESOLVE` and `ROUND_DONE` are transient.
 
 ## 10. Test checklist
 Conservation of cards at every step (hands + pot + in-flight = deck size) · no duplicates · normal round with 2…8 players · winner calls next · won-card order · 3-way tie and repeated clash · only tied players take part in a repeated clash · tied player with no next card · nobody can continue → pot carries · clash timeout picks a random stat (seeded) · first caller wins the race · CHOOSE with 3, 2, 1 and 4 cards (not offered above the threshold, not offered with 1) · caller eliminated · simultaneous elimination shares placement · uneven deal · round cap with equal counts · determinism for a fixed seed · thousands of seeded random games (2–8 seats, mixed CPU difficulties) that all terminate.

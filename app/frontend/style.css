@@ -206,80 +206,19 @@ h3.section { font-size: 14px; text-transform: uppercase; letter-spacing: .08em; 
 .seat-x:hover:not(:disabled) { color: var(--loss); border-color: var(--loss); }
 .seat-x:disabled { opacity: .4; }
 
-.table-status { text-align: center; gap: 6px; }
-.table-status .status { min-height: 0; }
-.table-status.clash { border-color: var(--loss); background: rgba(255, 93, 93, .1); }
-.table-status.clash .status { color: var(--loss); font-weight: 800; letter-spacing: .02em; }
-.status-meta { display: flex; justify-content: center; align-items: center; gap: 12px; color: var(--muted); font-size: 14px; }
-.countdown { font-variant-numeric: tabular-nums; font-weight: 800; color: var(--accent); min-width: 2.5em; }
 .pill { font-size: 12px; font-weight: 700; padding: 2px 9px; border-radius: 99px; background: var(--bg-2); border: 1px solid var(--line); color: var(--muted); white-space: nowrap; }
 
-.table { list-style: none; margin: 0; padding: 0; display: grid; gap: 8px; }
-.table li { display: flex; align-items: center; gap: 10px; background: var(--panel); border: 1px solid var(--line); border-radius: 12px; padding: 10px 14px; }
-.table li.mine { border-color: var(--accent); }
-.table li.caller { box-shadow: inset 3px 0 0 var(--accent); }
-.table li.contender { border-color: var(--loss); }
-.table li.out { opacity: .5; }
-.table .seat-name { flex: 1; font-weight: 600; }
-.table .seat-name em { color: var(--muted); font-style: normal; font-weight: 400; }
-.table .seat-no { width: 26px; height: 26px; border-radius: 50%; display: grid; place-items: center; font-size: 13px; font-weight: 700; background: var(--bg-2); color: var(--muted); }
-.tag { font-size: 11px; font-weight: 800; text-transform: uppercase; letter-spacing: .06em; color: var(--accent); }
-.tag.clash { color: var(--loss); }
 
-.hand { display: flex; gap: 12px; overflow-x: auto; padding: 4px 2px 12px; scroll-snap-type: x proximity; }
-.hand .card-wrap { flex: 0 0 min(260px, 72vw); margin: 0; scroll-snap-align: start; }
-.committed { text-align: center; }
 
 /* ===================== playing: call, choose, clash, reveal, feed, game over ===================== */
 .card .grid .hl { background: rgba(0, 0, 0, .14); border-radius: 4px; box-shadow: 0 0 0 1px rgba(0, 0, 0, .35); }
 
-.callpanel, .choosepanel { align-items: stretch; }
-.callpanel .card-wrap { margin: 0 auto; }
-.choose-hand { display: flex; gap: 12px; overflow-x: auto; padding: 6px 2px 10px; scroll-snap-type: x proximity; }
-.choose-card { flex: 0 0 min(230px, 66vw); padding: 0; background: none; border: 3px solid transparent; border-radius: 12px; scroll-snap-align: start; cursor: pointer; transition: transform .1s, border-color .15s; }
-.choose-card:hover:not(:disabled) { border-color: var(--line); }
-.choose-card[aria-pressed="true"] { border-color: var(--accent); transform: translateY(-4px); }
-.choose-card .card { pointer-events: none; }
 
-.table-status .countdown.big { font-size: 40px; line-height: 1; color: var(--loss); }
-.clash-banner { display: flex; flex-direction: column; align-items: center; gap: 2px; animation: clashPulse 1s ease-in-out infinite; }
-.clash-banner b { font-size: 26px; letter-spacing: .06em; color: var(--loss); }
-.clash-banner span { color: var(--muted); font-size: 14px; }
-@keyframes clashPulse { 0%, 100% { opacity: 1; } 50% { opacity: .6; } }
 
-.pill.clash { color: var(--loss); border-color: var(--loss); margin-left: 8px; }
-.last-round h3 { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
-.last-round .pill { margin-left: 4px; }
-.reveals { display: flex; gap: 12px; overflow-x: auto; padding: 4px 2px 8px; }
-.reveal { margin: 0; flex: 0 0 210px; display: flex; flex-direction: column; gap: 6px; text-align: center; }
-.reveal .card-wrap { width: 100%; margin: 0; }
-.reveal figcaption { font-size: 13px; font-weight: 600; color: var(--muted); }
-.reveal.winner { filter: drop-shadow(0 0 8px rgba(245, 225, 155, .55)); }
-.reveal.winner figcaption { color: var(--accent); }
-.last-round .result { margin: 0; text-align: center; font-weight: 600; }
-.last-round .result.out { color: var(--loss); font-weight: 500; }
-.last-round.fresh .reveal { animation: flipIn .5s ease both; animation-delay: calc(var(--i) * 0.12s); }
-@keyframes flipIn { from { opacity: 0; transform: rotateY(80deg) scale(.9); } to { opacity: 1; transform: none; } }
 
-.feed { list-style: none; margin: 0; padding: 0; display: grid; gap: 4px; color: var(--muted); font-size: 13px; }
-.feed li { padding: 4px 10px; border-left: 2px solid var(--line); }
-.feed li:first-child { color: var(--text); border-left-color: var(--accent); }
 
-.over { align-items: center; text-align: center; }
-.over .result-big { font-size: clamp(34px, 10vw, 52px); }
 
 /* ===================== your cards in order ===================== */
-.pile { background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius); padding: 0 16px; }
-.pile summary { cursor: pointer; display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 14px 0; font-weight: 700; list-style: none; }
-.pile summary::-webkit-details-marker { display: none; }
-.pile summary::after { content: '▾'; color: var(--muted); margin-left: 4px; transition: transform .15s; }
-.pile[open] summary::after { transform: rotate(180deg); }
-.pile summary span:first-child { flex: 1; }
-.pile ol { margin: 0 0 14px; padding: 0 0 0 28px; display: grid; gap: 6px; }
-.pile li { padding-left: 4px; }
-.pile li::marker { color: var(--muted); font-variant-numeric: tabular-nums; }
-.pile li em { color: var(--accent); font-style: normal; font-size: 12px; font-weight: 700; text-transform: uppercase; letter-spacing: .06em; }
-.pile .hint { margin: 0 0 14px; }
 
 /* ===================== big cards: a big win (green) or a big loss (red) ===================== */
 .bigcard { position: fixed; top: 14px; left: 50%; transform: translateX(-50%); z-index: 30; width: min(440px, 92vw); display: grid; gap: 6px; padding: 14px 16px;
@@ -293,9 +232,6 @@ h3.section { font-size: 14px; text-transform: uppercase; letter-spacing: .08em; 
 .bigcard .bigline.won { color: #b8ffd3; }
 .bigcard .bigline.lost { color: #ffc4c4; }
 .banner .bigline { margin: 8px 0 0; font-weight: 800; animation: linePop .6s cubic-bezier(.2, 1.4, .4, 1) backwards; }
-.last-round .result.big { font-weight: 800; animation: linePop .6s cubic-bezier(.2, 1.4, .4, 1) backwards; }
-.last-round .result.big.won { color: var(--win); }
-.last-round .result.big.lost { color: var(--loss); }
 @keyframes bigPop { 0% { opacity: 0; transform: translateX(-50%) scale(.5); } 60% { opacity: 1; transform: translateX(-50%) scale(1.08); } 100% { opacity: 1; transform: translateX(-50%) scale(1); } }
 @keyframes linePop { 0% { opacity: 0; transform: scale(.5); } 60% { opacity: 1; transform: scale(1.08); } 100% { opacity: 1; transform: scale(1); } }
 @keyframes bigShake { 0%, 100% { transform: translateX(-50%); } 15% { transform: translateX(calc(-50% - 12px)); } 30% { transform: translateX(calc(-50% + 12px)); } 45% { transform: translateX(calc(-50% - 8px)); } 60% { transform: translateX(calc(-50% + 8px)); } 80% { transform: translateX(calc(-50% - 3px)); } }

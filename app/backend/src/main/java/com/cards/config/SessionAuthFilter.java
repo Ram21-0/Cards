@@ -26,7 +26,7 @@ public class SessionAuthFilter extends OncePerRequestFilter {
     /** Paths whose state-changing requests need the header when sent with a cookie. */
     private static final Set<String> HEADER_PROTECTED = Set.of("/api/me", "/api/auth/logout", "/api/games");
     /** /api/games/{code}/(join|cpu|leave|start|call|choose) and /api/games/{code}/seats/{n} */
-    private static final Pattern GAME_ACTION = Pattern.compile("^/api/games/[^/]+/(join|cpu|leave|start|call|choose|seats/[^/]+)$");
+    private static final Pattern GAME_ACTION = Pattern.compile("^/api/games/[^/]+/(join|cpu|leave|start|call|choose|options|seats/[^/]+)$");
 
     static boolean requiresHeader(String path) {
         return HEADER_PROTECTED.contains(path) || GAME_ACTION.matcher(path).matches();

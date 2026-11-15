@@ -1,15 +1,15 @@
 import { Game, RESULT, DIFFICULTY } from './engine.js';
-import {
-  wsUrl, createLiveClient, initialLive, applyMessage, seatName, seatRows, phaseInfo, secondsLeft,
-  feedLines, callCard, clashInfo, overSummary, overFromGame, ordinal, pileList, pileTitle,
-} from './live.js';
+import { wsUrl, createLiveClient, initialLive, applyMessage, seatName, overFromGame } from './live.js';
+import { buildTable, tickTable, handleKey, holdControl } from './tableui.js';
+import { holdSeconds } from './table.js';
 import { strongMap, bigCardNotices, bigCardText } from './strength.js';
 import { parseRoute, toHash, paths, backDecision, needsUnloadGuard, redirectFor, upAction } from './nav.js';
 import {
-  API_BASE, ApiError, fetchDecks, fetchDeck, createGame, getGame, joinGame, addCpu, removeSeat, leaveLobby, startLiveGame, mapCard, callStat, chooseCard,
+  API_BASE, ApiError, fetchDecks, fetchDeck, createGame, getGame, joinGame, addCpu, removeSeat, leaveLobby, startLiveGame, updateGameOptions, mapCard, callStat, chooseCard,
   fetchNonce, googleSignIn, fetchMe, updateMe, signOut, deleteAccount, devLogin,
 } from './api.js';
 import { offlineDeck } from './offline.js';
+import { el } from './dom.js';
 
 const app = document.getElementById('app');
 const PLACEHOLDER = 'assets/placeholder.png';
@@ -29,19 +29,8 @@ function store(key, value) {
   } catch { return null; }
 }
 
-/* ---------- tiny DOM helper ---------- */
-const el = (tag, props = {}, ...kids) => {
-  const n = document.createElement(tag);
-  for (const [k, v] of Object.entries(props)) {
-    if (v == null || v === false) continue;
-    if (k === 'class') n.className = v;
-    else if (k.startsWith('on') && typeof v === 'function') n.addEventListener(k.slice(2), v);
-    else n.setAttribute(k, v === true ? '' : v);
-  }
-  for (const kid of kids.flat()) n.append(kid?.nodeType ? kid : document.createTextNode(kid ?? ''));
-  return n;
-};
-const show = (...nodes) => { screenId++; document.querySelector('.bigcard')?.remove(); app.replaceChildren(...nodes); window.scrollTo(0, 0); };
+/* ---------- tiny DOM helper: see dom.js ---------- */
+const show = (...nodes) => { screenId++; document.body.classList.remove('in-table'); document.querySelector('.bigcard')?.remove(); app.replaceChildren(...nodes); window.scrollTo(0, 0); };
 const screen = (cls, ...kids) => el('section', { class: `screen ${cls}` }, ...kids);
 
 function toast(msg) {
@@ -442,6 +431,9 @@ function closeLive() {
   if (!live) return;
   live.client?.close();
   clearInterval(live.ticker);
+  clearTimeout(live.overTimer);
+  document.removeEventListener('keydown', live.onKey);
+  document.body.classList.remove('in-table');
   live = null;
 }
 
@@ -479,24 +471,64 @@ function lobby(g) {
   const ctx = {
     code: g.joinCode, game: g, mySeat: seatOfMe(g), view: null, rt: initialLive(), conn: 'idle', deck: null,
     level: store('cpuLevel') || 'medium', busy: false, pending: false, pick: null, client: null, ticker: null,
+    picked: null, sheet: null, sheetFresh: false, tab: 'log', logSeen: 0, rm: store('reduceMotion') === '1', attempt: 0, reCalls: 0,
+    dismissedKey: null, overHoldUntil: 0, overHoldTotal: 0, tt: null, animKey: null, raceLost: false,
   };
   live = ctx;
   const root = screen('');
   show(root);
   const id = screenId;
   ctx.paint = () => {
-    if (live === ctx) root.replaceChildren(...(inTable(ctx.game) ? liveScreen(ctx) : lobbyScreen(ctx)));
+    if (live !== ctx) return;
+    const table = inTable(ctx.game);
+    document.body.classList.toggle('in-table', table);
+    root.className = `screen${table ? ' tbl-screen' : ''}`;
+    const scrolls = [...root.querySelectorAll('.pane')].map((p) => p.scrollTop);     // a repaint must not throw the log back to the top
+    root.replaceChildren(...(table ? buildTable(ctx, tableDeps) : lobbyScreen(ctx)));
+    root.querySelectorAll('.pane').forEach((p, i) => { if (scrolls[i]) p.scrollTop = scrolls[i]; });
+    if (ctx.focusSheet) { ctx.focusSheet = false; root.querySelector('.sheet .ib')?.focus(); }
   };
-  ctx.tick = () => {
-    const left = secondsLeft(ctx.view?.deadline, Date.now(), ctx.rt.skewMs);
-    const node = root.querySelector('.countdown');
-    if (node) node.textContent = left == null ? '' : `${left}s`;
-  };
-  ctx.ticker = setInterval(ctx.tick, 500);
+  ctx.tick = () => tickTable(ctx, root);
+  ctx.ticker = setInterval(ctx.tick, 100);
+  ctx.onKey = (e) => { if (live === ctx && handleKey(ctx, e, tableDeps)) e.preventDefault(); };
+  document.addEventListener('keydown', ctx.onKey);
 
   setGame(ctx, g);
   pollLoop(ctx, id);
 }
+
+/** What the table screen (tableui.js) needs from this file. */
+const tableDeps = {
+  cardView, mapCard, callStat, chooseCard, overFromGame,
+  play: (ctx, fn) => play(ctx, fn),
+  leave: () => (isSeated() ? askLeave() : goUp(paths.decks())),
+  openDeck: (id) => nav(paths.deck(id)),
+  backToDecks: () => goUp(paths.decks()),
+  open(ctx, which) {                                          // the log / pile: a sheet, or a tab of the docked panel on wide screens
+    ctx.tab = which;
+    if (matchMedia('(min-width:1100px)').matches) ctx.sheet = null;
+    else { ctx.sheet = which; ctx.sheetFresh = true; ctx.focusSheet = true; }
+    ctx.paint();
+  },
+  close(ctx) { ctx.sheet = null; ctx.paint(); },
+  openSettings(ctx) { ctx.sheet = 'settings'; ctx.sheetFresh = true; ctx.focusSheet = true; ctx.paint(); },
+  /** Host: change the result pause. One request at a time; the server's answer (and its broadcast) are the truth, a refusal is explained. */
+  async setHold(ctx, seconds) {
+    if (ctx.optBusy || live !== ctx) return;
+    ctx.optBusy = true;
+    ctx.paint();
+    try {
+      const g = await updateGameOptions(ctx.code, { resultHoldSeconds: seconds });
+      if (live === ctx) { ctx.game = { ...ctx.game, options: g.options }; ctx.tt = null; }
+    } catch (e) {
+      if (live !== ctx) return;
+      toast(e instanceof ApiError ? e.message : 'Could not reach the server');                  // 403 not the host, 400 out of range, 409 game over
+    } finally {
+      if (live === ctx) { ctx.optBusy = false; ctx.paint(); }
+    }
+  },
+  toggleMotion(ctx) { ctx.rm = !ctx.rm; store('reduceMotion', ctx.rm ? '1' : '0'); ctx.paint(); },
+};
 
 /** Takes a game body (REST or socket): updates what is shown, opens the socket once we hold a seat, loads the deck for the table. */
 function setGame(ctx, g) {
@@ -524,7 +556,13 @@ function startSocket(ctx) {
   ctx.client = createLiveClient({
     url: wsUrl({ apiBase: API_BASE, location, code: ctx.code }),
     probe: () => probeSocket(ctx.code),
-    onStatus: (s) => { if (live === ctx) { ctx.conn = s; ctx.paint(); } },
+    onStatus: (s) => {
+      if (live !== ctx) return;
+      if (s === 'open') ctx.reCalls = 0;
+      if (s === 'reconnecting') { ctx.reCalls = (ctx.conn === 'reconnecting' ? ctx.reCalls : 0) + 1; ctx.attempt = Math.ceil(ctx.reCalls / 2); }   // the client reports once when it drops and once per try
+      ctx.conn = s;
+      ctx.paint();
+    },
     onMessage: (msg) => onLiveMessage(ctx, msg),
     onFatal: (reason) => {
       if (live !== ctx) return;
@@ -560,6 +598,7 @@ function onLiveMessage(ctx, msg) {
   if (msg.type === 'view') {
     ctx.view = ctx.rt.view;
     if (ctx.pick != null && !(ctx.view.canChoose && ctx.view.ownHand.some((c) => c.id === ctx.pick))) ctx.pick = null;   // the choice is over
+    if (ctx.view.phase !== 'CLASH_AWAIT_CALL') ctx.raceLost = false;
     return ctx.paint();
   }
   if (msg.type === 'events') {
@@ -568,7 +607,19 @@ function onLiveMessage(ctx, msg) {
   }
   if (msg.type === 'gameOver') {
     ctx.mySeat = ctx.rt.mySeat;
+    const secs = ctx.view && ctx.rt.lastRound ? holdSeconds(ctx.game.options, ctx.rt.lastRound) : 0;   // the server holds no result after the last round: we do
+    if (secs > 0) {
+      ctx.overHoldTotal = secs;
+      ctx.overHoldUntil = Date.now() + secs * 1000;
+      clearTimeout(ctx.overTimer);
+      ctx.overTimer = setTimeout(() => { if (live === ctx) ctx.paint(); }, secs * 1000 + 50);
+    }
     return setGame(ctx, ctx.rt.game);
+  }
+  if (msg.type === 'options') {                                 // keep the game's rules current: the result hold length, the timers
+    ctx.game = { ...ctx.game, options: { ...ctx.game.options, ...msg.options } };
+    ctx.tt = null;                                                // the ring restarts from the new length
+    return ctx.paint();
   }
   if (msg.type !== 'lobby' && msg.type !== 'started') return;
   if (ctx.rt.mySeat == null && had) {                          // we were taken off the seat list
@@ -690,22 +741,17 @@ function lobbyScreen(ctx) {
     el('h3', { class: 'section' }, `Players · ${g.seats.length} / ${g.maxPlayers}`),
     seats,
     controls,
+    ctx.mySeat != null ? el('section', { class: 'panel' }, el('h3', {}, 'Game rules'), holdControl(ctx, tableDeps, { cls: 'hold' })) : '',
     action,
     el('p', { class: 'hint' }, `${g.deck.name} · up to ${g.maxPlayers} players`),
   ];
-}
-
-/** You see your whole hand only when CHOOSE lets you play any card; otherwise just the card on top of your pile. */
-function handTitle(v, mySeat) {
-  const total = v.handSizes?.[mySeat] ?? v.ownHand.length;
-  const visible = v.ownHand.length + (v.committed ? 1 : 0);
-  return visible >= total ? `Your hand · ${v.ownHand.length}` : `Your top card · ${total} in your pile`;
 }
 
 /** Runs a move (call a stat / choose a card): one at a time; the server's answer is our new view, refusals are explained. */
 async function play(ctx, fn) {
   if (ctx.pending || live !== ctx) return;
   ctx.pending = true;
+  ctx.raceLost = false;
   ctx.paint();
   try {
     const v = await fn();
@@ -722,91 +768,11 @@ async function play(ctx, fn) {
       closeLive();
       return signIn(paths.lobby(ctx.code));
     }
+    if (e instanceof ApiError && e.status === 409 && ctx.view?.phase === 'CLASH_AWAIT_CALL') ctx.raceLost = true;   // someone called first
     toast(e instanceof ApiError ? e.message : 'Could not reach the server');   // e.g. "too late: the stat was already set"
   } finally {
-    if (live === ctx) { ctx.pending = false; ctx.paint(); }
+    if (live === ctx) { ctx.pending = false; ctx.picked = null; ctx.paint(); }
   }
-}
-
-const statLabelOf = (ctx) => (key) => ctx.deck?.stats.find((s) => s.key === key)?.label ?? key;
-
-/** Your turn to call: your card, and one button per stat showing its value. In a clash the first call wins. */
-function callPanel(ctx, clash) {
-  const v = ctx.view;
-  const c = callCard(v);
-  if (!c || !ctx.deck) return '';
-  const card = mapCard(c, ctx.deck.stats);
-  return el('section', { class: 'panel callpanel' },
-    el('h3', {}, clash ? 'Race: call a stat first!' : 'Your turn: call a stat'),
-    el('div', { class: 'card-wrap' }, cardView(card, ctx.deck)),
-    el('div', { class: 'stat-grid' }, ctx.deck.stats.map((s) =>
-      el('button', { class: 'stat-btn', disabled: ctx.pending, onclick: () => play(ctx, () => callStat(ctx.code, s.key)) },
-        el('span', {}, s.label), el('b', {}, card.stats[s.key]?.display ?? '–')))));
-}
-
-/** CHOOSE: you may put any card from your hand in play. Tap a card, then confirm; or just play your top card. */
-function choosePanel(ctx) {
-  const v = ctx.view;
-  if (!ctx.deck) return '';
-  const hand = v.ownHand.map((c) => mapCard(c, ctx.deck.stats));
-  const stat = v.stat ? statLabelOf(ctx)(v.stat) : null;
-  const picked = hand.find((c) => c.id === ctx.pick);
-  return el('section', { class: 'panel choosepanel' },
-    el('h3', {}, stat ? `Choose a card to play · ${stat}` : 'Choose a card to play'),
-    el('p', { class: 'hint' }, stat ? `The stat is ${stat}: pick the card that does best.` : 'The stat is not known yet. Pick a card, then you call the stat.'),
-    el('div', { class: 'choose-hand' }, hand.map((c) =>
-      el('button', { class: 'choose-card', 'aria-pressed': String(c.id === ctx.pick), 'aria-label': `Play ${c.name}`, disabled: ctx.pending,
-        onclick: () => { ctx.pick = c.id; ctx.paint(); } }, cardView(c, ctx.deck, { highlight: v.stat })))),
-    el('div', { class: 'btn-row' },
-      el('button', { class: 'btn primary', disabled: !picked || ctx.pending, onclick: () => play(ctx, () => chooseCard(ctx.code, picked.id)) }, picked ? `Play ${picked.name}` : 'Pick a card'),
-      el('button', { class: 'btn', disabled: ctx.pending || !hand.length, onclick: () => play(ctx, () => chooseCard(ctx.code, hand[0].id)) }, 'Play top card')));
-}
-
-/** The cards that were just revealed and who won them. Built once per finished round, so its animation is not replayed by later repaints. */
-function lastRoundPanel(ctx) {
-  const lr = ctx.rt.lastRound;
-  if (!lr || !ctx.deck) return '';
-  if (ctx.lrSrc !== lr || ctx.lrDeck !== ctx.deck) {
-    ctx.lrSrc = lr;
-    ctx.lrDeck = ctx.deck;
-    ctx.lrNode = buildLastRound(ctx, lr);
-  }
-  return ctx.lrNode;
-}
-
-function buildLastRound(ctx, lr) {
-  const g = ctx.game;
-  const label = statLabelOf(ctx);
-  const cards = Object.entries(lr.cards ?? {});
-  return el('section', { class: 'panel last-round fresh' },
-    el('h3', {}, `Last round${lr.round ? ` · ${lr.round}` : ''}`,
-      lr.stat ? el('span', { class: 'pill' }, `${label(lr.stat)}${lr.statAuto ? ' (auto)' : ''}`) : '',
-      lr.clash ? el('span', { class: 'pill clash' }, `CLASH${lr.clash > 1 ? ` ×${lr.clash}` : ''}`) : ''),
-    cards.length ? el('div', { class: 'reveals' }, cards.map(([seat, c], i) => {
-      const win = Number(seat) === lr.winner;
-      return el('figure', { class: `reveal${win ? ' winner' : ''}`, style: `--i:${i}` },
-        el('div', { class: 'card-wrap' }, cardView(mapCard(c, ctx.deck.stats), ctx.deck, { highlight: lr.stat })),
-        el('figcaption', {}, seatName(g, Number(seat)), win ? ' 🏆' : ''));
-    })) : '',
-    el('p', { class: 'result' },
-      lr.winner != null ? `${seatName(g, lr.winner)} won the ${lr.clash > 0 ? 'clash' : 'round'} and takes ${lr.clash > 0 ? 'the pool: ' : ''}${lr.cardsWon} card${lr.cardsWon === 1 ? '' : 's'}`
-        : lr.potCarried != null ? `No winner: the pool (${lr.potCarried}) carries over` : ''),
-    ...bigCardNotices({ winnerSeat: lr.winner, mySeat: ctx.mySeat, reveals: lr.reveals, strong: ctx.strong }).map((n) => el('p', { class: `result big ${n.kind}` }, bigLine(n))),
-    ...lr.eliminated.map((e) => el('p', { class: 'result out' }, `${seatName(g, e.seat)} is out (#${e.placement})`)));
-}
-
-/** Your own cards in the order they come up after this turn: just the names, collapsible (the choice is remembered). */
-function pileSection(ctx) {
-  const rows = pileList(ctx.view);
-  if (!rows) return '';                                                   // the server does not send ownPile
-  const details = el('details', { class: 'pile' },
-    el('summary', {}, el('span', {}, pileTitle(ctx.view, ctx.mySeat)), el('span', { class: 'pill' }, String(rows.length))),
-    rows.length
-      ? el('ol', {}, rows.map((r, i) => el('li', {}, r.name, i === 0 ? el('em', {}, ' · next') : '')))
-      : el('p', { class: 'hint' }, 'No other cards: only the one in play.'));
-  details.open = ctx.pileOpen ?? store('pileOpen') !== '0';               // open unless the player closed it before
-  details.addEventListener('toggle', () => { ctx.pileOpen = details.open; store('pileOpen', details.open ? '1' : '0'); });
-  return details;
 }
 
 /* ---------- big cards: winning or losing one of the strongest cards of the deck is a big moment ---------- */
@@ -827,73 +793,6 @@ function announceBigCards(notices) {
   document.body.append(box);
   setTimeout(() => box.classList.add('out'), 4300);
   setTimeout(() => box.remove(), 4900);
-}
-
-/** The last few things that happened, newest first. */
-function feedList(ctx) {
-  const lines = feedLines(ctx.rt.feed, ctx.game, statLabelOf(ctx)).slice(-6).reverse();
-  return lines.length ? el('ol', { class: 'feed', 'aria-label': 'Recent events' }, lines.map((t) => el('li', {}, t))) : '';
-}
-
-/** The result, once the game has ended. */
-function overScreen(ctx) {
-  const g = ctx.game;
-  const sum = overSummary({ over: ctx.rt.over ?? overFromGame(g), game: g, mySeat: ctx.mySeat });
-  return [
-    el('div', { class: 'topbar' }, el('button', { class: 'btn small', onclick: () => goUp(paths.decks()) }, '← Decks'), el('h2', {}, g.deck.name), el('span')),
-    el('section', { class: 'panel over' },
-      el('h1', { class: `result-big ${sum.won ? 'won' : ''}` }, sum.title),
-      sum.endedByRoundCap ? el('p', { class: 'hint' }, 'The round limit ended the game: the player with the most cards wins.') : ''),
-    el('ol', { class: 'table' }, sum.rows.map((r) =>
-      el('li', { class: r.isMe ? 'mine' : '' },
-        el('span', { class: 'seat-no' }, r.placement != null ? String(r.placement) : '–'),
-        el('span', { class: 'seat-name' }, r.name, r.isMe ? el('em', {}, ' · you') : ''),
-        el('span', { class: 'pill' }, r.placement != null ? ordinal(r.placement) : '')))),
-    lastRoundPanel(ctx),
-    el('div', { class: 'btn-col' },
-      el('button', { class: 'btn primary', onclick: () => nav(paths.deck(g.deck.id)) }, 'New game with this deck'),
-      el('button', { class: 'btn', onclick: () => goUp(paths.decks()) }, 'Back to decks')),
-  ];
-}
-
-/** The table while the game runs: status, your move, who is where, what just happened. */
-function liveScreen(ctx) {
-  const g = ctx.game;
-  if (g.status === 'FINISHED') return overScreen(ctx);
-  const v = ctx.view;
-  const label = statLabelOf(ctx);
-  const info = phaseInfo({ view: v, game: g, mySeat: ctx.mySeat, statLabel: v?.stat ? label(v.stat) : undefined });
-  const clash = clashInfo({ view: v, game: g, mySeat: ctx.mySeat });
-  const rows = seatRows(g, v, ctx.mySeat);
-  const left = secondsLeft(v?.deadline, Date.now(), ctx.rt.skewMs);
-  const mine = v && ctx.deck && !v.canChoose && !v.canCall;                // nothing to do: just show your card(s)
-  const hand = mine ? v.ownHand.map((c) => mapCard(c, ctx.deck.stats)) : [];
-  const committed = mine && v.committed ? mapCard(v.committed, ctx.deck.stats) : null;
-
-  return [
-    el('div', { class: 'topbar' }, el('button', { class: 'btn small ghost', onclick: () => (isSeated() ? askLeave() : goUp(paths.decks())) }, '✕ Leave'), el('h2', {}, g.deck.name), connChip(ctx)),
-    el('section', { class: `panel table-status${info.clash ? ' clash' : ''}`, role: 'status' },
-      clash.active ? el('div', { class: 'clash-banner' }, el('b', {}, `⚔ CLASH${clash.level > 1 ? ` ×${clash.level}` : ''}`), el('span', {}, clash.names.length ? `${clash.names.join(' vs ')}${v.potSize ? ` · pool ${v.potSize}` : ''}` : '')) : '',
-      v ? el('div', { class: 'status-meta' }, el('b', {}, `Round ${v.round}`), !clash.active && v.potSize > 0 ? el('span', { class: 'pill' }, `Pool · ${v.potSize}`) : '', el('span', { class: `countdown${clash.active ? ' big' : ''}` }, left == null ? '' : `${left}s`)) : '',
-      el('p', { class: 'status' }, info.text)),
-    v && v.canChoose ? choosePanel(ctx) : '',
-    v && v.canCall ? callPanel(ctx, clash.active) : '',
-    el('ol', { class: 'table' }, rows.map((r) =>
-      el('li', { class: `${r.isMe ? 'mine' : ''}${r.out ? ' out' : ''}${r.isCaller ? ' caller' : ''}${r.isContender ? ' contender' : ''}` },
-        el('span', { class: 'seat-no' }, String(r.seat)),
-        el('span', { class: 'seat-name' }, r.name, r.isMe ? el('em', {}, ' · you') : '', r.seat === g.hostSeat ? el('em', {}, ' · host') : ''),
-        r.isCaller && !r.out ? el('span', { class: 'tag' }, 'calls') : '',
-        r.isContender ? el('span', { class: 'tag clash' }, 'clash') : '',
-        r.placement != null ? el('span', { class: 'tag' }, `#${r.placement}`) : '',
-        el('span', { class: 'pill' }, r.handSize == null ? '–' : r.out ? 'out' : `${r.handSize} card${r.handSize === 1 ? '' : 's'}`)))),
-    lastRoundPanel(ctx),
-    mine ? el('h3', { class: 'section' }, handTitle(v, ctx.mySeat)) : '',
-    committed ? el('div', { class: 'card-wrap committed' }, el('p', { class: 'hint' }, 'Played this round'), cardView(committed, ctx.deck, { highlight: v.stat })) : '',
-    hand.length ? el('div', { class: 'hand' }, hand.map((c) => el('div', { class: 'card-wrap' }, cardView(c, ctx.deck, { highlight: v.stat })))) : '',
-    v && !ctx.deck ? el('p', { class: 'hint' }, 'Loading your cards…') : '',
-    pileSection(ctx),
-    feedList(ctx),
-  ];
 }
 
 /* ---------- sign-in (Google) ---------- */

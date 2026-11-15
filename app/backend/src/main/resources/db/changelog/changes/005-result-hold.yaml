@@ -1,0 +1,14 @@
+# How long the round result stays up before the next round (RULES.md §2 step 8). The default mirrors application.yml.
+databaseChangeLog:
+
+  - changeSet:
+      id: 030-result-hold
+      author: cards
+      changes:
+        - addColumn:
+            tableName: games
+            columns:
+              - column: { name: result_hold_seconds, type: smallint, defaultValueNumeric: 6, remarks: "round result hold, 0 = none (0-20)", constraints: { nullable: false } }
+        - sql: ALTER TABLE games ADD CONSTRAINT games_result_hold_check CHECK (result_hold_seconds BETWEEN 0 AND 20)
+      rollback:
+        - dropColumn: { tableName: games, columnName: result_hold_seconds }

@@ -9,6 +9,7 @@ import com.cards.service.controller.dto.ChooseRequest;
 import com.cards.service.controller.dto.AddCpuRequest;
 import com.cards.service.controller.dto.CreateGameRequest;
 import com.cards.service.controller.dto.GameResponse;
+import com.cards.service.service.GameOptions;
 import com.cards.service.service.GameService;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.HttpStatus;
@@ -87,6 +88,14 @@ public class GameController {
     @GetMapping("/{joinCode}")
     public GameResponse get(@PathVariable String joinCode) {
         return GameResponse.from(games.get(joinCode), frontendBaseUrl);
+    }
+
+    /** Host: changes an option of the game (WAITING or IN_PROGRESS), e.g. {"resultHoldSeconds": 8}. Takes effect at once, also in a running game. */
+    @org.springframework.web.bind.annotation.PatchMapping("/{joinCode}/options")
+    public GameResponse options(@AuthenticationPrincipal Player me, @PathVariable String joinCode,
+                                @RequestBody com.cards.service.controller.dto.OptionsRequest request) {
+        rateLimiter.check(me.id());
+        return GameResponse.from(live.setOptions(joinCode, me, new GameOptions(null, null, null, null, request.resultHoldSeconds())), frontendBaseUrl);
     }
 
     /** The seat's owner calls a stat (caller in a normal round, anyone still in a clash). 400 unknown stat, 403 not your turn, 409 wrong phase. */

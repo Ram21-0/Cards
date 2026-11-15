@@ -69,7 +69,7 @@ class GameSimulationTest {
         int deckSize = n + setup.nextInt(41);
         for (int i = 1; i <= deckSize; i++) deck.add(simCard(i, maxValue, setup));
         GameSettings settings = new GameSettings(20 + setup.nextInt(181), setup.nextInt(6), 2 + setup.nextInt(9),
-                setup.nextBoolean() ? null : 5 + setup.nextInt(26));
+                setup.nextBoolean() ? null : 5 + setup.nextInt(26), setup.nextInt(3) == 0 ? 0 : setup.nextInt(21));
         CpuProfiles profiles = CpuProfiles.of(randomProfile(setup), randomProfile(setup), randomProfile(setup), randomProfile(setup));
 
         TestClock clock = TestClock.atNow();
@@ -84,6 +84,10 @@ class GameSimulationTest {
             if (++steps > 200_000) fail("seed " + seed + ": the game did not finish in 200000 steps (round " + e.round() + ", phase " + e.phase() + ")");
             e.checkInvariants();
             assertNobodySeesAnothersCards(e, n, seed);
+            if (e.phase() == Phase.ROUND_RESULT) {
+                assertTrue(e.actingSeats().isEmpty(), "seed " + seed + ": nobody acts during the result hold");
+                assertTrue(e.deadline().isPresent() && settings.resultHoldSeconds() > 0, "seed " + seed + ": the hold has a deadline");
+            }
 
             List<Integer> humansActing = e.actingSeats().stream().filter(s -> !specs.get(s - 1).isCpu()).toList();
             boolean act = !humansActing.isEmpty() && (bot.nextInt(100) < 80 || e.nextWakeup().isEmpty());

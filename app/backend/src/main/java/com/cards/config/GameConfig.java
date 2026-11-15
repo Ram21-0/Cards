@@ -21,8 +21,9 @@ public class GameConfig {
             @Value("${app.game.max-rounds:500}") int maxRounds,
             @Value("${app.game.choose-threshold:3}") int chooseThreshold,
             @Value("${app.game.clash-call-seconds:5}") int clashCallSeconds,
-            @Value("${app.game.turn-timeout-seconds:}") Integer turnTimeoutSeconds) {
-        return new GameSettings(maxRounds, chooseThreshold, clashCallSeconds, turnTimeoutSeconds);
+            @Value("${app.game.turn-timeout-seconds:}") Integer turnTimeoutSeconds,
+            @Value("${app.game.result-hold-seconds:6}") int resultHoldSeconds) {
+        return new GameSettings(maxRounds, chooseThreshold, clashCallSeconds, turnTimeoutSeconds, resultHoldSeconds);
     }
 
     /** Which strategy (and how much noise) plays each CPU difficulty. */
