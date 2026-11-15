@@ -444,7 +444,7 @@ const inTable = (g) => g.status === 'IN_PROGRESS' || g.status === 'FINISHED';
 /** My seat number according to the REST body (matched by username), or null. */
 const seatOfMe = (g) => (me?.username ? g.seats.find((s) => s.kind === 'HUMAN' && s.username === me.username)?.seat ?? null : null);
 
-const seatLabel = (g, s, mine) => `${seatName(g, s.seat)}${s.seat === g.hostSeat ? ' · host' : ''}${mine ? ' · you' : ''}`;
+const seatLabel = (g, s, mine) => `${seatName(g, s.seat)}${s.kind === 'CPU' ? ` · ${String(s.difficulty ?? 'medium').toLowerCase()}` : ''}${s.seat === g.hostSeat ? ' · host' : ''}${mine ? ' · you' : ''}`;
 const FATAL_TEXT = {
   'signed-out': 'You are signed out — sign in again to rejoin the table',
   'not-seated': 'You do not have a seat in this game',

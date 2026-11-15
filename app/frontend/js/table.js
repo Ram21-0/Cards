@@ -1,7 +1,7 @@
 // The table screen, as data (no DOM): which of the seven states we are in, what the heading says, the result row,
 // the event log, the countdown. Design: docs/gameplay-design/gameplay-design.md. Everything here is pure and unit-tested.
 
-import { seatName, callCard, clashInfo, ordinal, overSummary, overFromGame } from './live.js';
+import { seatName, cpuName, callCard, clashInfo, ordinal, overSummary, overFromGame } from './live.js';
 
 export const DEFAULT_HOLD_SECONDS = 6;     // how long a round result stays up (the server's `resultHoldSeconds` overrides it)
 export const HOLD_EXTRA_SECONDS = 3;       // ... plus this after a clash or an elimination
@@ -81,8 +81,10 @@ export function resultRows(lr, game, mySeat, stats) {
   const entries = Object.entries(lr?.cards ?? {}).map(([seat, card]) => ({ seat: Number(seat), card, value: card?.stats?.[lr.stat]?.value ?? null }));
   const dir = s && !s.higherWins ? 1 : -1;
   entries.sort((a, b) => (a.seat === lr?.winner ? -1 : b.seat === lr?.winner ? 1 : 0) || (a.value == null ? 1 : b.value == null ? -1 : dir * (a.value - b.value)));
-  const top = entries.find((e) => e.seat === lr?.winner)?.value ?? null;
+  const best = entries.filter((e) => e.value != null).sort((a, b) => dir * (a.value - b.value))[0]?.value ?? null;
+  const top = entries.find((e) => e.seat === lr?.winner)?.value ?? best;     // no winner (a tie): the best value is the one that is tied
   return entries.map((e) => ({
+    mine: e.seat === lr?.winner && lr.winner === mySeat,
     seat: e.seat,
     who: who(game, e.seat, mySeat),
     name: e.card?.name ?? '',
@@ -92,6 +94,29 @@ export function resultRows(lr, game, mySeat, stats) {
     tie: e.seat !== lr?.winner && top != null && e.value === top,
   }));
 }
+
+/**
+ * The cards of a finished round, level by level, so a clash shows the WHOLE pool that changed hands:
+ * the tied cards first, then each clash level. Only the last level has a winner. A round without a clash is one group.
+ * `lr.reveals` = [{ seat, card, level, stat }] for every card that was in play.
+ */
+export function resultGroups(lr, game, mySeat, stats) {
+  const reveals = lr?.reveals ?? [];
+  const levels = [...new Set(reveals.map((r) => r.level ?? 0))].sort((a, b) => a - b);
+  if (!(lr?.clash > 0) || levels.length < 2) return [{ level: 0, title: '', stat: lr?.stat, rows: resultRows(lr, game, mySeat, stats) }];
+  const last = levels.at(-1);
+  return levels.map((level) => {
+    const mine = reveals.filter((r) => (r.level ?? 0) === level);
+    const stat = mine.find((r) => r.stat)?.stat ?? lr.stat;
+    const cards = Object.fromEntries(mine.map((r) => [r.seat, r.card]));
+    const sub = { ...lr, stat, cards, winner: level === last ? lr.winner : null };
+    const title = level === 0 ? 'The tied cards' : `Clash${level > 1 ? ` ×${level}` : ''}`;
+    return { level, title: `${title}${stat ? ` · ${statLabel(stats, stat)}` : ''}`, stat, rows: resultRows(sub, game, mySeat, stats) };
+  });
+}
+
+/** Cards in the pool that were played in earlier rounds (carried over), so the row cannot show them: how many. */
+export const carriedCards = (lr) => (lr?.clash > 0 && lr.winner != null ? Math.max(0, (lr.cardsWon ?? 0) - (lr.reveals?.length ?? 0)) : 0);
 
 /** Heading, sub line and chips of the round result. `big` = bigCardNotices(...) for this round. */
 export function resultHead({ lr, game, mySeat, stats, big = [] }) {
@@ -142,11 +167,10 @@ export function seatChips({ game, view, mySeat, kind }) {
     const name = seatName(game, s.seat);
     const isMe = s.seat === mySeat;
     const cpu = s.kind === 'CPU';
-    // a crowded strip has no room for "CPU (medium)": "CPU M" still tells the computers apart
-    const short = isMe ? 'You' : cpu && n > 4 ? `CPU ${String(s.difficulty ?? 'medium')[0].toUpperCase()}` : name;
+    const short = isMe ? 'You' : cpu ? cpuName(s.seat) : name;                       // "Nova": the "(CPU)" is in the label and the sub line
     const count = kind === 'over' ? (placement != null ? ordinal(placement) : '–') : out ? 'OUT' : handSize == null ? '–' : String(handSize);
     const flag = contender ? 'VS' : caller ? (n > 5 ? 'CALL' : 'CALLS') : '';
-    const sub = contender ? 'In the clash' : out ? 'Out' : caller ? 'Calls' : isMe ? 'You' : '';
+    const sub = contender ? 'In the clash' : out ? 'Out' : caller ? 'Calls' : isMe ? 'You' : cpu ? `CPU ${String(s.difficulty ?? 'medium').toLowerCase()}` : '';
     const aria = [name, isMe ? '(you)' : null, kind === 'over' ? (placement != null ? `finished ${ordinal(placement)}` : null) : out ? 'out' : handSize == null ? null : plural(handSize, 'card'),
       caller ? 'calls' : null, contender ? 'in the clash' : null].filter(Boolean).join(', ');
     return {

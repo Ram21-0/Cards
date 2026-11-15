@@ -65,7 +65,7 @@ test('a lobby message for a WAITING game clears any old table view; a reconnect 
 test('seatName and seatRows', () => {
   const g = game();
   assert.equal(seatName(g, 1), 'ann');
-  assert.equal(seatName(g, 2), 'CPU (hard)');
+  assert.equal(seatName(g, 2), 'Nova (CPU)');
   assert.equal(seatName(g, 5), 'Seat 5');
   const rows = seatRows(g, { callerSeat: 1, clashLevel: 1, contenders: [1, 2], handSizes: { 1: 3, 2: 0 }, placements: {} }, 1);
   assert.equal(rows[0].isMe, true);
@@ -277,16 +277,16 @@ test('eventText wording for every event, including auto moves and clashes', () =
   const g = game();
   const label = (k) => ({ weight: 'Weight', rank: 'Rank' })[k] ?? k;
   assert.equal(eventText({ type: 'roundStarted', round: 2, caller: 1 }, g, label), 'Round 2: ann calls');
-  assert.equal(eventText({ type: 'cardChosen', seat: 2, auto: false }, g), 'CPU (hard) chose a card');
+  assert.equal(eventText({ type: 'cardChosen', seat: 2, auto: false }, g), 'Nova (CPU) chose a card');
   assert.equal(eventText({ type: 'cardChosen', seat: 1, auto: true }, g), 'ann chose a card (time ran out)');
   assert.equal(eventText({ type: 'statCalled', seat: 1, stat: 'weight', auto: false }, g, label), 'ann called Weight');
   assert.equal(eventText({ type: 'statCalled', seat: 1, stat: 'weight', auto: true }, g, label), 'ann called Weight (time ran out)');
   assert.equal(eventText({ type: 'statCalled', seat: null, stat: 'rank', auto: true }, g, label), 'Nobody called in time: Rank was picked at random');
-  assert.equal(eventText({ type: 'roundWon', seat: 2, cardsWon: 1 }, g), 'CPU (hard) won the round and takes 1 card');
+  assert.equal(eventText({ type: 'roundWon', seat: 2, cardsWon: 1 }, g), 'Nova (CPU) won the round and takes 1 card');
   assert.equal(eventText({ type: 'roundWon', seat: 1, cardsWon: 5 }, g), 'ann won the round and takes 5 cards');
-  assert.equal(eventText({ type: 'clashStarted', tiedSeats: [1, 2], level: 2, potSize: 6 }, g), 'CLASH ×2: ann and CPU (hard) tied (pool 6)');
+  assert.equal(eventText({ type: 'clashStarted', tiedSeats: [1, 2], level: 2, potSize: 6 }, g), 'CLASH ×2: ann and Nova (CPU) tied (pool 6)');
   assert.equal(eventText({ type: 'potCarried', potSize: 4 }, g), 'Nobody could settle the tie: the pool (4) carries over');
-  assert.equal(eventText({ type: 'playerEliminated', seat: 2, placement: 2 }, g), 'CPU (hard) is out (#2)');
+  assert.equal(eventText({ type: 'playerEliminated', seat: 2, placement: 2 }, g), 'Nova (CPU) is out (#2)');
   assert.equal(eventText({ type: 'gameOver', endedByRoundCap: true }, g), 'Round cap reached: game over');
   assert.equal(eventText({ type: 'nonsense' }, g), '');
 });
@@ -336,7 +336,7 @@ test('clashInfo: who is in the clash and whether I can race', () => {
   const c = clashInfo({ view: { phase: 'CLASH_AWAIT_CALL', clashLevel: 2, contenders: [1, 2], canCall: true }, game: g, mySeat: 1 });
   assert.equal(c.active, true);
   assert.equal(c.level, 2);
-  assert.deepEqual(c.names, ['ann', 'CPU (hard)']);
+  assert.deepEqual(c.names, ['ann', 'Nova (CPU)']);
   assert.equal(c.iAmContender, true);
   assert.equal(c.canRace, true);
   assert.equal(clashInfo({ view: { phase: 'CLASH_AWAIT_CHOOSE', clashLevel: 1, contenders: [2, 3] }, game: g, mySeat: 1 }).iAmContender, false);
@@ -359,7 +359,7 @@ test('overSummary: winner, runner-up, shared first place, and sorted rows', () =
   const won = overSummary({ over: { placements: { 1: 1, 2: 2, 3: 3 }, endedByRoundCap: false }, game: g, mySeat: 1 });
   assert.equal(won.title, 'You won!');
   assert.equal(won.won, true);
-  assert.deepEqual(won.rows.map((r) => r.name), ['ann', 'CPU (easy)', 'cy']);
+  assert.deepEqual(won.rows.map((r) => r.name), ['ann', 'Nova (CPU)', 'cy']);
   const third = overSummary({ over: { placements: { 1: 1, 2: 2, 3: 3 } }, game: g, mySeat: 3 });
   assert.equal(third.title, 'You finished 3rd');
   assert.equal(third.rows.at(-1).isMe, true);
@@ -398,7 +398,7 @@ test('pileTitle: "your pile" when the whole pile is listed, "after this turn" wh
 test('winning a clash says how many cards were won from the pool; a normal round does not', () => {
   const g = game();
   assert.equal(eventText({ type: 'roundWon', seat: 1, cardsWon: 6 }, g, undefined, { clash: true }), 'ann won the clash and takes the pool: 6 cards');
-  assert.equal(eventText({ type: 'roundWon', seat: 2, cardsWon: 1 }, g, undefined, { clash: true }), 'CPU (hard) won the clash and takes the pool: 1 card');
+  assert.equal(eventText({ type: 'roundWon', seat: 2, cardsWon: 1 }, g, undefined, { clash: true }), 'Nova (CPU) won the clash and takes the pool: 1 card');
   assert.equal(eventText({ type: 'roundWon', seat: 1, cardsWon: 6 }, g), 'ann won the round and takes 6 cards');
 });
 
@@ -420,8 +420,8 @@ test('feedLines: the clash wording applies only to the round that had a clash, a
   ];
   const lines = feedLines(events, g, (k) => k);
   assert.ok(lines.includes('ann won the round and takes 2 cards'));
-  assert.ok(lines.includes('CPU (hard) won the clash and takes the pool: 6 cards'));
-  assert.ok(lines.includes('CPU (hard) won the round and takes 2 cards'));
+  assert.ok(lines.includes('Nova (CPU) won the clash and takes the pool: 6 cards'));
+  assert.ok(lines.includes('Nova (CPU) won the round and takes 2 cards'));
   assert.equal(lines.filter((l) => l.includes('the pool:')).length, 1);
   assert.ok(!lines.includes('Cards revealed') && !lines.includes('Game over'));
   assert.equal(lines[0], 'Round 1: ann calls');                                 // oldest first

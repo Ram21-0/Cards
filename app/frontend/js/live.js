@@ -82,11 +82,15 @@ export function applyMessage(state, msg, nowMs = Date.now()) {
   return next;
 }
 
-/** A seat's display name: the player, or "CPU (hard)". */
+/** Every computer player gets a name, by seat, so they can be told apart ("Nova (CPU)"). Usernames are lowercase, these are not. */
+export const CPU_NAMES = ['Rex', 'Nova', 'Blaze', 'Echo', 'Zed', 'Maya', 'Orion', 'Sage'];
+export const cpuName = (seat) => CPU_NAMES[(Math.max(1, Number(seat) || 1) - 1) % CPU_NAMES.length];
+
+/** A seat's display name: the player, or "Nova (CPU)". */
 export function seatName(game, seat) {
   const s = game?.seats?.find((x) => x.seat === seat);
   if (!s) return `Seat ${seat}`;
-  return s.kind === 'CPU' ? `CPU (${String(s.difficulty ?? 'medium').toLowerCase()})` : s.username;
+  return s.kind === 'CPU' ? `${cpuName(seat)} (CPU)` : s.username;
 }
 
 /** One row per seat for the table: hand size, whose call it is, who is in a clash, who is out. */
@@ -237,7 +241,7 @@ export function foldRounds({ current, lastRound }, events) {
       case 'revealed':
         cur ??= fresh(null, null);
         // `cards` is the latest reveal (what the panel shows); `reveals` keeps every card that was in play, clash levels included
-        cur = { ...cur, cards: ev.cards, reveals: [...cur.reveals, ...Object.entries(ev.cards).map(([seat, card]) => ({ seat: Number(seat), card }))] };
+        cur = { ...cur, cards: ev.cards, reveals: [...cur.reveals, ...Object.entries(ev.cards).map(([seat, card]) => ({ seat: Number(seat), card, level: cur.clash, stat: cur.stat }))] };
         break;
       case 'roundWon':
         cur ??= fresh(null, null);
