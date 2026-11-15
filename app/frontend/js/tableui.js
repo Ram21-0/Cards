@@ -8,7 +8,7 @@
 import { el } from './dom.js';
 import { seatName, callCard, ordinal } from './live.js';
 import {
-  tableKind, seatChips, resultHead, pileView, logGroups, callRule, bestIndex, statLabel, timerModel, timerTotal, urgentAtFor, overHead, holdSeconds,
+  tableKind, seatChips, resultHead, resultGroups, carriedCards, pileView, logGroups, callRule, bestIndex, statLabel, timerModel, timerTotal, urgentAtFor, overHead, holdSeconds,
 } from './table.js';
 import { bigCardNotices, bestStat } from './strength.js';
 import { HOLD_MAX, clampHold, holdText } from './table.js';
@@ -124,13 +124,13 @@ const cta = (label, onclick, { ghost = false, fill = false, cnt = null, disabled
   class: `cta${ghost ? ' ghost' : ''}`, onclick, disabled,
 }, fill ? el('i', { class: 'fill' }) : '', el('span', {}, label, cnt != null ? [' ', el('span', { class: 'cnt' }, String(cnt))] : ''));
 
-function revealRow(ctx, d, rows, stat, key) {
+function revealRow(ctx, d, rows, stat, key, freshOverride) {
   if (!rows.length) return '';
-  const fresh = ctx.animKey !== key;
-  ctx.animKey = key;
+  const fresh = freshOverride ?? ctx.animKey !== key;
+  if (freshOverride === undefined) ctx.animKey = key;
   return el('div', { class: `t-reveals${rows.length > 4 ? ' scroll' : ''}${fresh ? ' fresh' : ''}`, style: `--per:${Math.min(rows.length, 4)}`, role: 'list', 'aria-label': 'Revealed cards' },
-    rows.map((r, i) => el('figure', { class: `rv ${r.winner ? 'win' : 'lose'}${r.tie ? ' eq' : ''}`, role: 'listitem', style: `--i:${i}` },
-      r.winner ? el('span', { class: 't-tag' }, 'WINNER') : '',
+    rows.map((r, i) => el('figure', { class: `rv ${r.winner ? 'win' : 'lose'}${r.winner && !r.mine ? ' theirs' : ''}${r.tie ? ' eq' : ''}`, role: 'listitem', style: `--i:${i}` },
+      r.winner ? el('span', { class: `t-tag${r.mine ? '' : ' theirs'}` }, 'WINNER') : '',
       d.cardView(d.mapCard(r.card, ctx.deck.stats), ctx.deck, { highlight: stat }),
       el('figcaption', {}, el('span', { class: 'who' }, r.who), el('span', { class: 'val' }, `${statLabel(ctx.deck.stats, stat)} ${r.display}`)))));
 }
@@ -293,6 +293,20 @@ function resultBody(ctx, d, lr) {
   return { h, key, chips };
 }
 
+/** Every card that changed hands: for a clash, level by level (the tied cards, then each clash), plus a note for cards carried over. */
+function resultCards(ctx, d, lr, key) {
+  const groups = resultGroups(lr, ctx.game, ctx.mySeat, ctx.deck.stats);
+  const fresh = ctx.animKey !== key;
+  ctx.animKey = key;
+  const carried = carriedCards(lr);
+  return [
+    groups.map((g, i) => [
+      g.title ? el('div', { class: 'sechead', style: 'margin:6px 0 0' }, g.title) : '',
+      revealRow(ctx, d, g.rows, g.stat, `${key}:${i}`, fresh)]),
+    carried ? el('p', { class: 'pnote', style: 'margin:4px 0 0;color:var(--muted);font-size:13px' }, `The pool also held ${plural(carried, 'card')} left over from earlier rounds.`) : '',
+  ].flat(Infinity);                                                                    // el() flattens one level only
+}
+
 function stateResult(ctx, d, v) {
   const lr = ctx.rt.lastRound;
   const final = ctx.game.status === 'FINISHED';
@@ -306,7 +320,7 @@ function stateResult(ctx, d, v) {
   return el('main', { class: 'stage' }, el('div', { class: 'resultwrap' },
     head(h.h1, h.tone, h.sub),
     el('div', { class: 't-chips', style: 'margin-top:0' }, chips),
-    revealRow(ctx, d, h.rows, lr.stat, key),
+    resultCards(ctx, d, lr, key),
     el('div', { style: 'flex:1' }),
     cta('Continue', done, { fill: true, cnt: tm?.whole ?? '' })));
 }
@@ -554,6 +568,10 @@ export function handleKey(ctx, e, d) {
   if (e.key === 'Escape' && ctx.sheet) { d.close(ctx); return true; }
   if (ctx.sheet || !ctx.view || ctx.mySeat == null) return false;
   const kind = tableKind({ game: ctx.game, view: ctx.view, rt: ctx.rt, mySeat: ctx.mySeat, ui: { dismissedKey: ctx.dismissedKey, overHoldUntil: ctx.overHoldUntil } });
+  if (kind === 'result' && (e.key === ' ' || e.key === 'Enter') && e.target?.tagName !== 'BUTTON') {         // Continue, from the keyboard
+    document.querySelector('.tbl .resultwrap .cta')?.click();
+    return true;
+  }
   const n = Number(e.key);
   const callerChoose = kind === 'choose' && !ctx.view.stat && ctx.view.callerSeat === ctx.mySeat;
   if ((kind === 'call' || kind === 'clash' || callerChoose) && n >= 1 && n <= (ctx.deck?.stats.length ?? 0) && !ctx.pending && !ctx.picked) {

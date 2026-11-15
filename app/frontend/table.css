@@ -421,3 +421,8 @@ body.in-table { overflow:hidden; }
   .tbl .st-callchoose .cardlab { display:none; }
 }
 .tbl .st-callchoose .tile { min-height:62px; }
+
+/* a round won by someone else: the outline and the tag are red, like the heading */
+.tbl .rv.win.theirs .card { box-shadow:0 0 0 3px var(--loss), 0 0 26px rgba(255,93,93,.35); }
+.tbl .rv .t-tag.theirs { background:var(--loss); color:#2a0606; }
+.tbl .rv.win.theirs figcaption .val { background:var(--loss); color:#2a0606; border-color:var(--loss); }

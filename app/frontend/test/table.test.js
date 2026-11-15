@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
   holdSeconds, isOut, tableKind, callRule, bestIndex, resultRows, resultHead, seatChips, pileView, logGroups,
-  timerTotal, timerModel, urgentAtFor, overHead, clampHold, holdText,
+  timerTotal, timerModel, urgentAtFor, overHead, clampHold, holdText, resultGroups, carriedCards,
 } from '../js/table.js';
 
 const stats = [
@@ -98,7 +98,7 @@ const round = (extra = {}) => ({
 test('resultRows: the winner first, then best to worst, ties with the winner marked', () => {
   const rows = resultRows(round(), game(), 1, stats);
   assert.deepEqual(rows.map((r) => r.name), ['RANDY ORTON', 'JOHN CENA', 'BIG SHOW', 'KANE']);
-  assert.deepEqual(rows.map((r) => r.who), ['ann', 'you', 'bob', 'CPU (hard)']);
+  assert.deepEqual(rows.map((r) => r.who), ['ann', 'you', 'bob', 'Blaze (CPU)']);
   assert.deepEqual(rows.map((r) => r.winner), [true, false, false, false]);
   const tie = resultRows(round({ cards: { 1: card(1, 'A', 90), 2: card(2, 'B', 90), 3: card(3, 'C', 80) } }), game(), 1, stats);
   assert.deepEqual(tie.map((r) => r.tie), [false, true, false]);
@@ -119,7 +119,7 @@ test('resultHead: I win / someone wins / a clash / nobody wins, with chips for t
   assert.equal(other.h1, 'ann wins the round');
   assert.equal(other.tone, 'loss');
   assert.deepEqual(other.sub, [{ b: 'FIGHT' }, " RANDY ORTON 90 beats your JOHN CENA 89."]);
-  assert.deepEqual(other.chips.map((c) => c.text), ['ann takes 4 cards', 'CPU (hard) is out · 4th', 'Big card: you lost JOHN CENA']);
+  assert.deepEqual(other.chips.map((c) => c.text), ['ann takes 4 cards', 'Blaze (CPU) is out · 4th', 'Big card: you lost JOHN CENA']);
   assert.equal(other.chips[2].tone, 'lost');
 
   const clash = resultHead({ lr: round({ winner: 1, clash: 2, cardsWon: 9 }), game: game(), mySeat: 1, stats });
@@ -149,9 +149,10 @@ test('seatChips: who calls, who is in the clash, who is out, and the count', () 
   assert.deepEqual(clash.map((x) => x.dim), [false, false, true, true]);          // those not in the clash fade, nobody is "calling"
 
   const big = { ...game(), seats: Array.from({ length: 6 }, (_, i) => ({ seat: i + 1, kind: 'CPU', difficulty: 'EASY' })) };
-  assert.equal(seatChips({ game: big, view: view(), mySeat: 1, kind: 'call' })[1].short, 'CPU E');                 // crowded strip: short CPU names
-  assert.equal(seatChips({ game: big, view: view(), mySeat: 1, kind: 'call' })[1].name, 'CPU (easy)');             // the full name stays for labels
-  assert.equal(chips[2].short, 'CPU (hard)');                                                                       // four seats: room for the full name
+  assert.equal(seatChips({ game: big, view: view(), mySeat: 1, kind: 'call' })[1].short, 'Nova');                   // every computer has a name
+  assert.equal(seatChips({ game: big, view: view(), mySeat: 1, kind: 'call' })[1].name, 'Nova (CPU)');              // the full name stays for labels
+  assert.equal(seatChips({ game: big, view: view(), mySeat: 1, kind: 'call' })[1].sub, 'CPU easy');                 // and the level shows under it
+  assert.equal(chips[2].short, 'Blaze');
   assert.equal(seatChips({ game: big, view: view({ callerSeat: 2 }), mySeat: 1, kind: 'call' })[1].flag, 'CALL');   // short label above 5 seats
 
   const result = seatChips({ game: game(), view: view({ phase: 'ROUND_RESULT', callerSeat: 2, clashLevel: 1, contenders: [1, 2] }), mySeat: 1, kind: 'result' });
@@ -245,7 +246,7 @@ test('overHead: who won, where I finished, how long it lasted, the round-cap wor
   const h = overHead({ over, game: g, mySeat: 1, rounds: 38 });
   assert.equal(h.h1, 'ann wins');
   assert.equal(h.sub, 'You finished 2nd of 4. Game lasted 38 rounds.');
-  assert.deepEqual(h.rows.map((r) => r.name), ['ann', 'me', 'CPU (hard)', 'bob']);
+  assert.deepEqual(h.rows.map((r) => r.name), ['ann', 'me', 'Blaze (CPU)', 'bob']);
   assert.equal(h.won, false);
   assert.equal(overHead({ over: { placements: { 1: 1, 2: 2 }, endedByRoundCap: false }, game: g, mySeat: 1 }).h1, 'You win');
   assert.equal(overHead({ over: { placements: { 1: 1, 2: 1 }, endedByRoundCap: false }, game: g, mySeat: 1 }).h1, 'You tied for 1st');
@@ -262,4 +263,27 @@ test('clampHold / holdText: the result pause is 0 to 20 whole seconds, 0 reads "
   assert.equal(clampHold(undefined), 0);
   assert.equal(holdText(0), 'No pause');
   assert.equal(holdText(6), '6 s');
+});
+
+test('resultGroups: a clash shows every level, only the last has a winner; a plain round is one group', () => {
+  const lr = round({
+    clash: 1, winner: 2, cardsWon: 7, stat: 'weight',
+    reveals: [
+      { seat: 1, card: card(1, 'A', 50, 100), level: 0, stat: 'fight' }, { seat: 2, card: card(2, 'B', 50, 100), level: 0, stat: 'fight' },
+      { seat: 1, card: card(3, 'C', 10, 120), level: 1, stat: 'weight' }, { seat: 2, card: card(4, 'D', 10, 150), level: 1, stat: 'weight' },
+    ],
+  });
+  const groups = resultGroups(lr, game(), 1, stats);
+  assert.deepEqual(groups.map((g) => g.title), ['The tied cards · Fight', 'Clash · Weight']);
+  assert.deepEqual(groups[0].rows.map((r) => [r.name, r.winner, r.tie]), [['A', false, true], ['B', false, true]]);   // tied, nobody won this level
+  assert.deepEqual(groups[1].rows.map((r) => [r.name, r.winner]), [['D', true], ['C', false]]);
+  assert.equal(carriedCards(lr), 3);                                                                                  // 7 cards won, 4 shown: 3 came from earlier rounds
+  assert.equal(carriedCards({ ...lr, reveals: [...lr.reveals, ...lr.reveals], cardsWon: 8 }), 0);
+  assert.equal(resultGroups(round(), game(), 1, stats).length, 1);
+  assert.equal(carriedCards(round()), 0);
+});
+
+test('resultRows: the winner is mine or theirs (the outline is green for me, red for the others)', () => {
+  assert.deepEqual(resultRows(round({ winner: 2 }), game(), 1, stats).map((r) => r.mine), [false, false, false, false]);
+  assert.equal(resultRows(round({ winner: 1 }), game(), 1, stats)[0].mine, true);
 });
