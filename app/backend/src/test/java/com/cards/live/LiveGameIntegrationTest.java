@@ -620,4 +620,88 @@ class LiveGameIntegrationTest {
         }
         return callerChooseSteps;
     }
+
+    @Test
+    void theHostChangesTheResultHoldInTheLobbyAndDuringTheGameEveryoneIsToldAndItSurvivesAReconnect() throws Exception {
+        Human ann = new Human("oh_ann"), bob = new Human("oh_bob");
+        String deckId = jdbc.queryForObject("select id::text from decks where name = 'Wrestling'", String.class);
+        JsonNode created = call(HttpMethod.POST, "/api/games", ann.token,
+                "{\"deckId\":\"" + deckId + "\",\"maxPlayers\":3,\"options\":{\"maxRounds\":30,\"resultHoldSeconds\":6}}", 201);
+        String code = created.get("joinCode").asText();
+        call(HttpMethod.POST, "/api/games/" + code + "/join", bob.token, null, 200);
+        call(HttpMethod.POST, "/api/games/" + code + "/cpu", ann.token, "{\"difficulty\":\"hard\"}", 200);
+        ann.connect(code);
+        bob.connect(code);
+
+        // in the lobby: the host can, a guest cannot, nonsense is refused
+        JsonNode changed = call(HttpMethod.PATCH, "/api/games/" + code + "/options", ann.token, "{\"resultHoldSeconds\":7}", 200);
+        assertEquals(7, changed.get("options").get("resultHoldSeconds").asInt());
+        for (Human h : new Human[]{ann, bob}) {
+            JsonNode message = h.ws.awaitType("options");
+            assertEquals(7, message.get("options").get("resultHoldSeconds").asInt());
+        }
+        call(HttpMethod.PATCH, "/api/games/" + code + "/options", bob.token, "{\"resultHoldSeconds\":1}", 403);
+        call(HttpMethod.PATCH, "/api/games/" + code + "/options", ann.token, "{\"resultHoldSeconds\":21}", 400);
+        call(HttpMethod.PATCH, "/api/games/" + code + "/options", ann.token, "{\"resultHoldSeconds\":-1}", 400);
+        call(HttpMethod.PATCH, "/api/games/" + code + "/options", ann.token, "{}", 400);
+        call(HttpMethod.PATCH, "/api/games/NOPE12/options", ann.token, "{\"resultHoldSeconds\":3}", 404);
+        assertEquals(7, jdbc.queryForObject("select result_hold_seconds from games where join_code = ?", Integer.class, code).intValue());
+        ResponseEntity<String> anonymous = rest.exchange("/api/games/" + code + "/options", HttpMethod.PATCH, jsonEntity("{\"resultHoldSeconds\":3}", null), String.class);
+        assertEquals(401, anonymous.getStatusCode().value());
+
+        // during the game: a long hold so the test can look at it, then lowered while it is running
+        call(HttpMethod.POST, "/api/games/" + code + "/start", ann.token, null, 200);
+        call(HttpMethod.PATCH, "/api/games/" + code + "/options", ann.token, "{\"resultHoldSeconds\":20}", 200);
+        assertEquals(20, bob.ws.awaitType("options").get("options").get("resultHoldSeconds").asInt());
+        assertEquals(20, jdbc.queryForObject("select result_hold_seconds from games where join_code = ?", Integer.class, code).intValue());
+        call(HttpMethod.PATCH, "/api/games/" + code + "/options", bob.token, "{\"resultHoldSeconds\":1}", 403);
+
+        java.util.Random random = new java.util.Random(5);
+        long deadline = System.nanoTime() + java.util.concurrent.TimeUnit.SECONDS.toNanos(30);
+        while (System.nanoTime() < deadline) {
+            boolean acted = ann.act(code, random) | bob.act(code, random);
+            ann.drain();
+            if (ann.gameOver != null) throw new AssertionError("the game ended before any round result was shown");
+            JsonNode latest = latestView(ann);
+            if (latest != null && "ROUND_RESULT".equals(latest.get("phase").asText())) break;
+            if (!acted) { Thread.sleep(5); }
+        }
+        JsonNode holdView = latestView(ann);
+        assertEquals("ROUND_RESULT", holdView.get("phase").asText(), "a round result hold started");
+        long shown = java.time.Duration.between(java.time.Instant.parse(holdView.get("serverTime").asText()), java.time.Instant.parse(holdView.get("deadline").asText())).toSeconds();
+        assertTrue(shown >= 19, "the 20 s hold (23 after a clash or elimination) is on show: " + shown);
+        assertEquals(java.util.List.of(), hasAnyAction(ann, bob));
+
+        call(HttpMethod.PATCH, "/api/games/" + code + "/options", ann.token, "{\"resultHoldSeconds\":2}", 200);
+        ann.ws.awaitType("options");
+        Thread.sleep(150);
+        ann.drain();
+        assertEquals("ROUND_RESULT", latestView(ann).get("phase").asText(), "lowered but not over yet");
+        scheduler.advance(java.time.Duration.ofSeconds(6));                     // 2 s (5 s after a clash or elimination) from the start of the hold
+        Thread.sleep(150);
+        ann.drain();
+        assertTrue(!"ROUND_RESULT".equals(latestView(ann).get("phase").asText()), "the hold ended on time after being lowered");
+
+        // a reconnect shows the current value
+        ann.ws.close();
+        assertTrue(ann.ws.awaitClosed(5_000));
+        ann.connect(code);
+        assertEquals(2, ann.ws.all().get(0).get("game").get("options").get("resultHoldSeconds").asInt());
+    }
+
+    private static JsonNode latestView(Human h) {
+        JsonNode last = null;
+        for (JsonNode m : h.ws.all()) if ("view".equals(m.path("type").asText())) last = m;
+        return last;
+    }
+
+    /** Nobody can call or choose while the result is on show. */
+    private static java.util.List<String> hasAnyAction(Human... humans) {
+        java.util.List<String> actors = new java.util.ArrayList<>();
+        for (Human h : humans) {
+            JsonNode v = latestView(h);
+            if (v != null && (v.get("canCall").asBoolean() || v.get("canChoose").asBoolean())) actors.add(h.name);
+        }
+        return actors;
+    }
 }

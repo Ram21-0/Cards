@@ -113,6 +113,28 @@ public class GameService {
         return details(game, code);
     }
 
+    /**
+     * The host changes a game option (only resultHoldSeconds so far; more can be added to {@link GameOptions}). Allowed while the
+     * game is WAITING or IN_PROGRESS. The live layer applies it to the running engine.
+     */
+    @Transactional
+    public GameDetails setOptions(String joinCode, Player host, GameOptions options) {
+        String code = normalize(joinCode);
+        Game game = lockedGame(code);
+        requireHost(game, host);
+        if (game.status() != GameStatus.WAITING && game.status() != GameStatus.IN_PROGRESS) {
+            throw new ConflictException("The game is over");
+        }
+        if (options == null || options.resultHoldSeconds() == null) throw new BadRequestException("resultHoldSeconds is required");
+        try {
+            GameSettings.resolve(null, null, null, null, options.resultHoldSeconds(), defaultSettings);      // range check
+        } catch (IllegalArgumentException e) {
+            throw new BadRequestException(e.getMessage());
+        }
+        games.setResultHold(game.id(), options.resultHoldSeconds());
+        return details(game.toBuilder().resultHoldSeconds(options.resultHoldSeconds()).build(), code);
+    }
+
     /** The host removes a CPU seat. Human players leave on their own ({@link #leave}). */
     @Transactional
     public GameDetails removeSeat(String joinCode, Player host, int seat) {

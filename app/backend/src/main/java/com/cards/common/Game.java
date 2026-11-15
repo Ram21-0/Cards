@@ -12,7 +12,7 @@ import java.util.UUID;
  * {@code joinCode} is what gets shared: link = <frontend>/join/<joinCode>.
  */
 @Getter
-@Builder
+@Builder(toBuilder = true)
 @Accessors(fluent = true)
 public class Game {
     private final UUID id;

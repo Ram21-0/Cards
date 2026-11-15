@@ -41,6 +41,11 @@ public class LiveMessages {
         return write(game("started", details, playerId));
     }
 
+    /** The game's options changed (everyone gets it, whatever the phase); the same values are in every {@code lobby} message's game body. */
+    public String options(GameDetails details) {
+        return write(Map.of("type", "options", "serverTime", clock.instant(), "options", GameResponse.from(details, frontendBaseUrl).options()));
+    }
+
     public String pong() {
         return write(Map.of("type", "pong", "serverTime", clock.instant()));
     }

@@ -71,6 +71,14 @@ public class LivePlay {
         });
     }
 
+    /** The host changed the result hold: apply it to the running engine (also to a hold in progress) and tell everyone. */
+    public void setResultHold(LiveGame live, int seconds) {
+        live.withLock(() -> {
+            afterChange(live, live.engine().setResultHoldSeconds(seconds));
+            return null;
+        });
+    }
+
     // ------------------------------------------------------------------------------------------ lifecycle
 
     /** The game has just started: tell everyone ({@code started}, the opening events, their views) and start the clocks. */

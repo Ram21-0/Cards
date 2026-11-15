@@ -57,7 +57,7 @@ public final class GameEngine {
 
     // ---- configuration (immutable)
     private final List<StatDefinition> stats;
-    private final GameSettings settings;
+    private GameSettings settings;                                           // only resultHoldSeconds ever changes, via setResultHoldSeconds
     private final RandomGenerator rnd;
     private final Clock clock;
     private final CpuPlayer cpu;
@@ -79,6 +79,8 @@ public final class GameEngine {
     private int clashLevel;
     private StatDefinition stat;
     private Instant deadline;
+    private Instant holdStart;                                                // when the current ROUND_RESULT hold began
+    private boolean holdLonger;                                               // that round had a clash or an elimination (+3 s)
     private int nextCaller;                                                   // who calls once the ROUND_RESULT hold is over
     private Integer roundWinner;                                              // set when a round ends; null = the pot carried
 
@@ -592,10 +594,11 @@ public final class GameEngine {
             return;
         }
         // the round did not end the game: show its result for a while before the next one starts
-        boolean longer = clashLevel > 0 || !knockedOut.isEmpty();
+        holdLonger = clashLevel > 0 || !knockedOut.isEmpty();
+        holdStart = at;
         nextCaller = next;
         phase = Phase.ROUND_RESULT;
-        deadline = at.plusSeconds(settings.resultHoldSeconds() + (longer ? GameSettings.EXTRA_HOLD_SECONDS : 0));
+        deadline = holdDeadline();
     }
 
     private void finish(boolean cap) {
@@ -737,6 +740,32 @@ public final class GameEngine {
         List<Card> all = new ArrayList<>(s.hand);
         if (inFlight.containsKey(s.number)) all.add(inFlight.get(s.number));
         return all;
+    }
+
+    private Instant holdDeadline() {
+        return holdStart.plusSeconds(settings.resultHoldSeconds() + (holdLonger ? GameSettings.EXTRA_HOLD_SECONDS : 0));
+    }
+
+    /**
+     * The host changed the result hold (0-20). It applies from now on and also to a hold that is already running: its
+     * deadline becomes (start of the hold) + the new value (+3 for a clash/elimination round), so lowering it can end the
+     * hold at once (0 always does) and raising it extends it.
+     *
+     * @throws IllegalArgumentException when the value is outside the range
+     */
+    public List<GameEvent> setResultHoldSeconds(int seconds) {
+        settings = new GameSettings(settings.maxRounds(), settings.chooseThreshold(), settings.clashCallSeconds(),
+                settings.turnTimeoutSeconds(), seconds);
+        if (over() || phase != Phase.ROUND_RESULT) return drain();
+        Instant now = clock.instant();
+        Instant ends = holdDeadline();
+        deadline = seconds == 0 || ends.isBefore(now) ? now : ends;        // never in the past: the next round's clocks start now
+        settle(now, Integer.MAX_VALUE);
+        return drain();
+    }
+
+    public int resultHoldSeconds() {
+        return settings.resultHoldSeconds();
     }
 
     private Instant turnDeadline(Instant at) {

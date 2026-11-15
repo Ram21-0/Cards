@@ -115,6 +115,10 @@ public class GameRepository {
         jdbc.update("update games set status = ? where id = ?", status.dbVal(), gameId);
     }
 
+    public void setResultHold(UUID gameId, int seconds) {
+        jdbc.update("update games set result_hold_seconds = ? where id = ?", seconds, gameId);
+    }
+
     /** WAITING -> IN_PROGRESS. */
     public void markStarted(UUID gameId, Instant now) {
         jdbc.update("update games set status = ?, started_at = ? where id = ?", GameStatus.IN_PROGRESS.dbVal(), Timestamp.from(now), gameId);

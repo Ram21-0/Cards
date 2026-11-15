@@ -38,12 +38,14 @@ import java.util.UUID;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.delete;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.options;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.patch;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.put;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.header;
@@ -448,6 +450,30 @@ class AuthWebTest {
         // a Bearer client needs no header
         mvc.perform(post("/api/games/K7Q2XM/call").header("Authorization", "Bearer good-token").contentType(MediaType.APPLICATION_JSON).content("{\"stat\":\"power\"}"))
                 .andExpect(status().isOk());
+    }
+
+    @Test
+    void thePatchOptionsEndpointNeedsSignInAndTheHeaderAndAnswersWithTheGame() throws Exception {
+        String url = "/api/games/K7Q2XM/options";
+        mvc.perform(patch(url).contentType(MediaType.APPLICATION_JSON).content("{\"resultHoldSeconds\":8}")).andExpect(status().isUnauthorized());
+        mvc.perform(patch(url).cookie(GOOD).contentType(MediaType.APPLICATION_JSON).content("{\"resultHoldSeconds\":8}"))
+                .andExpect(status().isForbidden()).andExpect(jsonPath("$.error").value("Missing X-Requested-With header"));
+        when(live.setOptions(eq("K7Q2XM"), eq(ANN), any())).thenReturn(details("K7Q2XM"));
+
+        mvc.perform(patch(url).cookie(GOOD).header(HDR, "cards").contentType(MediaType.APPLICATION_JSON).content("{\"resultHoldSeconds\":8}"))
+                .andExpect(status().isOk()).andExpect(jsonPath("$.joinCode").value("K7Q2XM")).andExpect(jsonPath("$.options.resultHoldSeconds").exists());
+        org.mockito.ArgumentCaptor<com.cards.service.service.GameOptions> captured = org.mockito.ArgumentCaptor.forClass(com.cards.service.service.GameOptions.class);
+        verify(live).setOptions(eq("K7Q2XM"), eq(ANN), captured.capture());
+        org.junit.jupiter.api.Assertions.assertEquals(8, captured.getValue().resultHoldSeconds());
+
+        when(live.setOptions(eq("K7Q2XM"), eq(ANN), any())).thenThrow(new com.cards.common.BadRequestException("resultHoldSeconds must be between 0 and 20"));
+        mvc.perform(patch(url).cookie(GOOD).header(HDR, "cards").contentType(MediaType.APPLICATION_JSON).content("{\"resultHoldSeconds\":99}"))
+                .andExpect(status().isBadRequest()).andExpect(jsonPath("$.error").value("resultHoldSeconds must be between 0 and 20"));
+        when(live.setOptions(eq("K7Q2XM"), eq(ANN), any())).thenThrow(new com.cards.common.ForbiddenException("Only the host can do that"));
+        mvc.perform(patch(url).cookie(GOOD).header(HDR, "cards").contentType(MediaType.APPLICATION_JSON).content("{\"resultHoldSeconds\":3}"))
+                .andExpect(status().isForbidden()).andExpect(jsonPath("$.error").value("Only the host can do that"));
+        mvc.perform(patch(url).header("Authorization", "Bearer good-token").contentType(MediaType.APPLICATION_JSON).content("{\"resultHoldSeconds\":3}"))
+                .andExpect(status().isForbidden());    // a Bearer client needs no header; this is the host check above
     }
 
     @Test

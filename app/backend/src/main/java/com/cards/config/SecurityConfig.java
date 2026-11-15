@@ -43,6 +43,7 @@ public class SecurityConfig {
                         .requestMatchers(HttpMethod.POST, "/api/games", "/api/games/*/join", "/api/games/*/cpu", "/api/games/*/leave",
                                 "/api/games/*/start", "/api/games/*/call", "/api/games/*/choose").authenticated()                      // reading a game (join-link preview) stays public
                         .requestMatchers(HttpMethod.DELETE, "/api/games/*/seats/*").authenticated()
+                        .requestMatchers(HttpMethod.PATCH, "/api/games/*/options").authenticated()
                         .anyRequest().permitAll())
                 .addFilterBefore(new SessionAuthFilter(sessions, cookies), UsernamePasswordAuthenticationFilter.class);
         return http.build();
@@ -56,7 +57,7 @@ public class SecurityConfig {
         if (!origins.isEmpty()) {
             CorsConfiguration cors = new CorsConfiguration();
             cors.setAllowedOrigins(origins);
-            cors.setAllowedMethods(List.of("GET", "POST", "PUT", "DELETE", "OPTIONS"));
+            cors.setAllowedMethods(List.of("GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"));
             cors.setAllowedHeaders(List.of("Content-Type", "Authorization", "X-Requested-With"));
             cors.setAllowCredentials(true);
             cors.setMaxAge(3600L);

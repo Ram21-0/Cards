@@ -6,6 +6,7 @@ import com.cards.common.ForbiddenException;
 import com.cards.common.Player;
 import com.cards.game.GameRuleException;
 import com.cards.service.service.GameDetails;
+import com.cards.service.service.GameOptions;
 import com.cards.service.service.GameService;
 import com.cards.service.service.StartedGame;
 import org.springframework.stereotype.Service;
@@ -55,6 +56,21 @@ public class LiveGameService {
     public GameDetails removeSeat(String code, Player host, int seat) {
         GameDetails details = games.removeSeat(code, host, seat);
         pushLobby(details.game().joinCode());
+        return details;
+    }
+
+    /**
+     * The host changes an option (resultHoldSeconds): saved, applied to the running engine at once and pushed to everyone as an
+     * {@code options} message (reconnecting clients see it in the {@code lobby} message's game body).
+     */
+    public GameDetails setOptions(String code, Player host, GameOptions options) {
+        GameDetails details = games.setOptions(code, host, options);
+        String joinCode = details.game().joinCode();
+        registry.find(joinCode).ifPresent(live -> play.setResultHold(live, options.resultHoldSeconds()));
+        synchronized (lockFor(joinCode)) {
+            String text = messages.options(details);
+            for (Connection c : hub.connections(joinCode)) c.send(text);
+        }
         return details;
     }
 

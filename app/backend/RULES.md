@@ -24,6 +24,7 @@ The authoritative spec for the rules engine (pure Java, no Spring/DB code). Agre
 6. **Tie for best → clash (§3).**
 7. A player left with no cards is eliminated (§5); if that ends the game, or the round cap is reached (§6), the game is over **at once** (no hold).
 8. **Result hold:** otherwise the round's result stays up for `resultHoldSeconds` (phase `ROUND_RESULT`, `deadline` = when it ends), **+3 s when the round involved a clash or an elimination** (6 → 9 by default). During the hold nobody can call or choose (409), CPU seats do nothing and no turn timer or CPU delay runs; the next round (and its turn timer / CPU delays) starts only when the hold ends. `resultHoldSeconds = 0` goes straight to the next round.
+   **The host can change `resultHoldSeconds` at any time during the game** (lobby or running). It applies at once and also to a hold that is already on show: that hold's deadline becomes *(start of the hold)* + the new value (+3 s if that round had a clash or an elimination), so lowering it can end the hold early (0 ends it right now; a deadline already in the past means "now", and the next round's clocks start then) and raising it extends it.
 
 Cards are never discarded: they cycle back to the winner's pile.
 

@@ -177,4 +177,96 @@ class GameEngineResultHoldTest {
         assertTrue(e.isOver());
         assertNotEquals(Phase.ROUND_RESULT, e.phase());
     }
+
+    // ---------------------------------------------------------------- the host changes the hold during the game
+
+    private GameEngine inHold() {
+        GameEngine e = engine(held, humans(2), hands(hand(card(11, 9), card(12, 1)), hand(card(21, 2), card(22, 3))));
+        e.call(1, "power");                                             // a normal round: 6 s hold, started now
+        assertEquals(Phase.ROUND_RESULT, e.phase());
+        return e;
+    }
+
+    @Test
+    void loweringTheHoldShortensARunningHoldFromItsStart() {
+        Instant t0 = clock.instant();
+        GameEngine e = inHold();
+        clock.advance(Duration.ofSeconds(2));
+
+        e.setResultHoldSeconds(3);
+
+        assertEquals(Phase.ROUND_RESULT, e.phase());
+        assertEquals(t0.plusSeconds(3), e.view(1).deadline(), "start of the hold + the new value");
+        clock.advance(Duration.ofSeconds(1));
+        e.tick(clock.instant());
+        assertEquals(2, e.round(), "ended on time at 3 s");
+    }
+
+    @Test
+    void loweringBelowTheTimeAlreadyShownEndsTheHoldNowAndTheNextTimerStartsNow() {
+        GameEngine e = inHold();
+        clock.advance(Duration.ofSeconds(5));
+        Instant now = clock.instant();
+
+        List<GameEvent> events = e.setResultHoldSeconds(2);             // 2 s would have ended 3 s ago
+
+        assertEquals(2, e.round(), "the next round started at once");
+        assertEquals(1, only(events, GameEvent.RoundStarted.class).size());
+        assertEquals(now.plusSeconds(10), e.view(1).deadline(), "the turn timer starts now, not in the past");
+    }
+
+    @Test
+    void zeroEndsTheRunningHoldNowAndTurnsHoldsOffForGood() {
+        GameEngine e = inHold();
+        List<GameEvent> events = e.setResultHoldSeconds(0);
+        assertEquals(2, e.round());
+        assertEquals(1, only(events, GameEvent.RoundStarted.class).size());
+        assertEquals(Phase.AWAIT_CALL, e.phase());
+        e.call(1, "power");                                             // seat 1 has 3 cards, wins again
+        assertNotEquals(Phase.ROUND_RESULT, e.phase(), "no hold any more");
+    }
+
+    @Test
+    void raisingExtendsARunningHold() {
+        Instant t0 = clock.instant();
+        GameEngine e = inHold();
+        clock.advance(Duration.ofSeconds(5));
+
+        e.setResultHoldSeconds(12);
+
+        assertEquals(t0.plusSeconds(12), e.view(1).deadline());
+        clock.advance(Duration.ofSeconds(6));                           // 11 s: still on show
+        assertTrue(e.tick(clock.instant()).isEmpty());
+        clock.advance(Duration.ofSeconds(1));
+        e.tick(clock.instant());
+        assertEquals(2, e.round());
+    }
+
+    @Test
+    void aClashRoundKeepsItsThreeExtraSecondsWhenTheValueChanges() {
+        Instant t0 = clock.instant();
+        GameEngine e = engine(held, humans(3), hands(
+                hand(card(11, 5), card(12, 8)), hand(card(21, 5), card(22, 3), card(23, 4)), hand(card(31, 1), card(32, 1), card(33, 1))));
+        e.call(1, "power");
+        e.call(2, "power");
+        assertEquals(t0.plusSeconds(9), e.view(1).deadline());
+
+        e.setResultHoldSeconds(10);
+
+        assertEquals(t0.plusSeconds(13), e.view(1).deadline(), "10 + 3");
+    }
+
+    @Test
+    void theNewValueAppliesToLaterHoldsAndIsRangeChecked() {
+        GameEngine e = engine(held, humans(2), hands(hand(card(11, 9), card(12, 9), card(13, 9)), hand(card(21, 2), card(22, 3), card(23, 4))));
+        e.setResultHoldSeconds(4);                                      // not in a hold: only changes the setting
+        assertEquals(4, e.resultHoldSeconds());
+        Instant t = clock.instant();
+        e.call(1, "power");
+        assertEquals(t.plusSeconds(4), e.view(1).deadline());
+
+        assertThrows(IllegalArgumentException.class, () -> e.setResultHoldSeconds(21));
+        assertThrows(IllegalArgumentException.class, () -> e.setResultHoldSeconds(-1));
+        assertEquals(4, e.resultHoldSeconds(), "a refused value changes nothing");
+    }
 }

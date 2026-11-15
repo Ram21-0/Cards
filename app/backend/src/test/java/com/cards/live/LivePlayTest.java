@@ -13,6 +13,7 @@ import com.cards.game.GameSettings;
 import com.cards.live.LiveTestKit.FakeSocket;
 import com.cards.service.db.GameRepository;
 import com.cards.service.service.GameDetails;
+import com.cards.service.service.GameOptions;
 import com.cards.service.service.GameService;
 import com.fasterxml.jackson.databind.JsonNode;
 import org.junit.jupiter.api.Test;
@@ -262,6 +263,69 @@ class LivePlayTest {
         assertEquals(2, next.get("round").asInt());
         assertEquals(t0.plusSeconds(16), java.time.Instant.parse(next.get("deadline").asText()), "the turn timer starts when the hold ends");
         assertEquals(2, events(forBob).stream().filter(e -> "roundStarted".equals(e.get("type").asText())).count());
+    }
+
+    // ---------------------------------------------------------------- the host changes the hold during the game
+
+    private GameDetails withHold(int seconds) {
+        GameDetails running = details(GameStatus.IN_PROGRESS, ann, List.of(human(1, ann), human(2, bob)));
+        return new GameDetails(running.game().toBuilder().resultHoldSeconds(seconds).build(), running.deck(), running.seats());
+    }
+
+    private void hostSets(int seconds) {
+        GameOptions o = new GameOptions(null, null, null, null, seconds);
+        when(games.setOptions(CODE, ann, o)).thenReturn(withHold(seconds));
+        service.setOptions(CODE, ann, o);
+    }
+
+    @Test
+    void loweringTheHoldDuringARunningHoldEndsItOnTime() throws Exception {
+        startGame(new GameSettings(500, 0, 5, 10, 6), List.of(List.of(card(1, 1, 3, 1), card(1, 2, 5, 5)), List.of(card(2, 1, 9, 3), card(2, 2, 4, 4))), true, true);
+        java.time.Instant t0 = clock.instant();
+        service.call(CODE, ann, "power");
+        assertEquals("ROUND_RESULT", lastView(forBob).get("phase").asText());
+        scheduler.advance(Duration.ofSeconds(1));
+
+        hostSets(3);
+
+        assertEquals(t0.plusSeconds(3), java.time.Instant.parse(lastView(forBob).get("deadline").asText()), "the pushed view carries the new deadline");
+        scheduler.advance(Duration.ofSeconds(1));
+        assertEquals("ROUND_RESULT", lastView(forBob).get("phase").asText());
+        scheduler.advance(Duration.ofSeconds(1));
+        assertEquals("AWAIT_CALL", lastView(forBob).get("phase").asText(), "the hold ended at 3 s");
+        assertEquals(2, lastView(forBob).get("round").asInt());
+    }
+
+    @Test
+    void raisingTheHoldExtendsItAndEveryoneGetsAnOptionsMessage() throws Exception {
+        startGame(new GameSettings(500, 0, 5, null, 6), List.of(List.of(card(1, 1, 3, 1), card(1, 2, 5, 5)), List.of(card(2, 1, 9, 3), card(2, 2, 4, 4))), true, true);
+        java.time.Instant t0 = clock.instant();
+        service.call(CODE, ann, "power");
+        scheduler.advance(Duration.ofSeconds(5));
+
+        hostSets(15);
+
+        for (FakeSocket socket : List.of(forAnn, forBob)) {
+            JsonNode options = json().readTree(socket.ofType("options").get(0));
+            assertEquals(15, options.get("options").get("resultHoldSeconds").asInt());
+            assertEquals(5, options.get("options").get("clashCallSeconds").asInt());
+        }
+        assertEquals(t0.plusSeconds(15), java.time.Instant.parse(lastView(forAnn).get("deadline").asText()));
+        scheduler.advance(Duration.ofSeconds(9));                       // 14 s
+        assertEquals("ROUND_RESULT", lastView(forBob).get("phase").asText());
+        scheduler.advance(Duration.ofSeconds(1));
+        assertEquals("AWAIT_CALL", lastView(forBob).get("phase").asText());
+    }
+
+    @Test
+    void zeroEndsTheHoldImmediately() throws Exception {
+        startGame(new GameSettings(500, 0, 5, null, 6), List.of(List.of(card(1, 1, 3, 1), card(1, 2, 5, 5)), List.of(card(2, 1, 9, 3), card(2, 2, 4, 4))), true, true);
+        service.call(CODE, ann, "power");
+
+        hostSets(0);
+
+        assertEquals("AWAIT_CALL", lastView(forBob).get("phase").asText());
+        assertEquals(2, lastView(forBob).get("round").asInt());
     }
 
     @Test
