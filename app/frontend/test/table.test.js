@@ -149,6 +149,9 @@ test('seatChips: who calls, who is in the clash, who is out, and the count', () 
   assert.deepEqual(clash.map((x) => x.dim), [false, false, true, true]);          // those not in the clash fade, nobody is "calling"
 
   const big = { ...game(), seats: Array.from({ length: 6 }, (_, i) => ({ seat: i + 1, kind: 'CPU', difficulty: 'EASY' })) };
+  assert.equal(seatChips({ game: big, view: view(), mySeat: 1, kind: 'call' })[1].short, 'CPU E');                 // crowded strip: short CPU names
+  assert.equal(seatChips({ game: big, view: view(), mySeat: 1, kind: 'call' })[1].name, 'CPU (easy)');             // the full name stays for labels
+  assert.equal(chips[2].short, 'CPU (hard)');                                                                       // four seats: room for the full name
   assert.equal(seatChips({ game: big, view: view({ callerSeat: 2 }), mySeat: 1, kind: 'call' })[1].flag, 'CALL');   // short label above 5 seats
 
   const result = seatChips({ game: game(), view: view({ phase: 'ROUND_RESULT', callerSeat: 2, clashLevel: 1, contenders: [1, 2] }), mySeat: 1, kind: 'result' });

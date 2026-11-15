@@ -136,13 +136,16 @@ export function seatChips({ game, view, mySeat, kind }) {
     const dim = clashOn && !contender && !out;
     const name = seatName(game, s.seat);
     const isMe = s.seat === mySeat;
+    const cpu = s.kind === 'CPU';
+    // a crowded strip has no room for "CPU (medium)": "CPU M" still tells the computers apart
+    const short = isMe ? 'You' : cpu && n > 4 ? `CPU ${String(s.difficulty ?? 'medium')[0].toUpperCase()}` : name;
     const count = kind === 'over' ? (placement != null ? ordinal(placement) : '–') : out ? 'OUT' : handSize == null ? '–' : String(handSize);
     const flag = contender ? 'VS' : caller ? (n > 5 ? 'CALL' : 'CALLS') : '';
     const sub = contender ? 'In the clash' : out ? 'Out' : caller ? 'Calls' : isMe ? 'You' : '';
     const aria = [name, isMe ? '(you)' : null, kind === 'over' ? (placement != null ? `finished ${ordinal(placement)}` : null) : out ? 'out' : handSize == null ? null : plural(handSize, 'card'),
       caller ? 'calls' : null, contender ? 'in the clash' : null].filter(Boolean).join(', ');
     return {
-      seat: s.seat, name, short: isMe ? 'You' : name, initial: (name[0] ?? '?').toUpperCase(), isMe, out, caller, contender, dim, count, flag, sub,
+      seat: s.seat, name, short, initial: (name[0] ?? '?').toUpperCase(), isMe, out, caller, contender, dim, count, flag, sub,
       unit: kind === 'over' || out || handSize == null ? '' : handSize === 1 ? 'card' : 'cards', aria, n,
     };
   });

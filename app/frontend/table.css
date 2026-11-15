@@ -377,3 +377,27 @@ body.in-table { overflow:hidden; }
   .tbl .app[data-kind="result"] .t-side { display:none; }
   .tbl .app[data-kind="result"] .t-reveals, .tbl .app[data-kind="result"] .resultwrap .head { max-width:980px; }
 }
+
+/* choose tray: a name with the stat it is best at under it (before the stat is known) */
+.tbl .tile .tn2 { display:flex; flex-direction:column; align-items:center; min-width:0; max-width:100%; gap:1px; }
+.tbl .tile .sl { font-size:10px; font-weight:700; letter-spacing:.08em; text-transform:uppercase; color:var(--muted); }
+@media (min-width:700px) { .tbl .tile .tn2 { flex:1; align-items:flex-start; text-align:left; } }
+
+/* a long result (long names, several chips) on a short phone: nothing shrinks onto its neighbour; the area scrolls and Continue stays in reach */
+.tbl .resultwrap, .tbl .st-out { overflow-y:auto; overscroll-behavior:contain; }
+.tbl .resultwrap > :not([style*="flex:1"]), .tbl .st-out > :not([style*="flex:1"]) { flex-shrink:0; }
+.tbl .resultwrap > .cta, .tbl .st-out > .cta-row { position:sticky; bottom:0; }
+.tbl .resultwrap > .cta { box-shadow:0 -10px 14px -6px var(--bg); }
+
+/* game over on web: the final place is a short word, and the last round gets the larger column */
+@media (min-width:700px) {
+  .tbl .app[data-kind="over"] .seat .s-count b { font-size:22px; }
+  .tbl .overwrap { grid-template-columns:minmax(0, .85fr) minmax(0, 1.15fr); }
+}
+
+/* a little more room for names in the rail (232 px): "CPU (easy)" should not be cut */
+@media (min-width:700px) {
+  .tbl .seat { gap:9px; padding:0 12px 0 8px; }
+  .tbl .seat .s-av { width:34px; height:34px; font-size:18px; }
+  .tbl .seat .s-name, .tbl .seat[data-n] .s-name { font-size:14.5px; }
+}

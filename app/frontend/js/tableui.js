@@ -12,6 +12,7 @@ import {
 } from './table.js';
 import { bigCardNotices, bestStat } from './strength.js';
 
+const PLACEHOLDER = 'assets/placeholder.png';
 const RING = 163.4;                           // circumference of the timer ring (r = 26)
 const WIDE = '(min-width:1100px)';
 const reducedMotion = (ctx) => Boolean(ctx.rm) || (typeof matchMedia === 'function' && matchMedia('(prefers-reduced-motion: reduce)').matches);
@@ -240,9 +241,8 @@ function stateChoose(ctx, d, v) {
           return el('button', { class: `tile${c.id === sel.id ? ' sel' : ''}`, role: 'radio', 'aria-checked': String(c.id === sel.id), disabled: ctx.pending, 'data-i': String(i),
             onclick: () => { ctx.pick = c.id; ctx.paint(); } },
             el('span', { class: 'tg' }, i === 0 ? el('b', {}, 'TOP') : '', i === best ? el('b', { class: 'best' }, 'BEST') : ''),
-            el('span', { class: 'n' }, c.name),
-            el('span', { class: 'v' }, stat ? c.stats[stat.key]?.display ?? '–' : top?.display ?? '–'),
-            top ? el('span', { class: 'n' }, top.label) : '');
+            el('span', { class: 'tn2' }, el('span', { class: 'n' }, c.name), top ? el('span', { class: 'sl' }, top.label) : ''),
+            el('span', { class: 'v' }, stat ? c.stats[stat.key]?.display ?? '–' : top?.display ?? '–'));
         })),
         el('p', { class: 't-hint' }, stat ? `${stat.label} shown on each card. Time out plays your top card.` : 'Best stat shown on each card. Time out plays your top card.'),
         cta(`Play ${sel.name}`, () => d.play(ctx, () => d.chooseCard(ctx.code, sel.id)), { disabled: ctx.pending }))));
@@ -372,7 +372,7 @@ function rail(ctx, v, kind) {
     }, c.flag ? el('span', { class: 's-flag' }, c.flag) : '', el('span', { class: 's-av', 'aria-hidden': 'true' }, c.initial),
     el('span', { class: 'nm2' }, el('span', { class: 's-name' }, c.short), el('span', { class: 's-sub' }, c.sub)),
     el('span', { class: 's-count' }, el('b', {}, c.count), el('i', {}, c.unit))))),
-    v ? el('div', { class: 'tablebox' }, el('small', {}, 'Pool'), el('b', {}, String(pool)), ' ', el('span', { style: 'color:var(--muted)' }, pool === 1 ? 'card' : 'cards', clash ? ` · clash ×${v.clashLevel}` : ''),
+    v ? el('div', { class: 'tablebox' }, el('small', {}, 'Pool'), el('b', {}, String(pool)), ' ', el('span', { style: 'color:var(--muted)' }, pool === 1 ? 'card' : 'cards', clash ? ` · clash${v.clashLevel > 1 ? ` ×${v.clashLevel}` : ''}` : ''),
       pool ? el('div', { class: 'stack', 'aria-hidden': 'true' }, Array.from({ length: Math.min(Math.max(pool, 1), 6) }, () => el('i'))) : '') : '');
 }
 
@@ -395,7 +395,7 @@ function pilePane(ctx) {
   return [el('p', { class: 'pnote' }, p.note),
     p.rows.length ? el('ul', { class: 'piles', 'aria-label': 'My pile' }, p.rows.map((r, i) => el('li', { class: r.inPlay ? 'inplay' : r.next ? 'next' : '' },
       el('span', { class: 'ix' }, r.inPlay ? '▶' : String(i + (p.rows[0].inPlay ? 0 : 1))),
-      el('span', { class: 'th' }, r.img ? el('img', { src: r.img, alt: '', loading: 'lazy' }) : ''),
+      el('span', { class: 'th' }, el('img', { src: r.img || PLACEHOLDER, alt: '', loading: 'lazy', onerror: (e) => { e.target.src = PLACEHOLDER; } })),
       el('span', { class: 'nm' }, r.name),
       r.inPlay || r.next ? el('span', { class: 't-pill' }, r.inPlay ? 'In play' : 'Next') : '',
       r.brand ? el('span', { class: `br${r.brand === 'sd' ? ' sd' : ''}` }, r.brand === 'sd' ? 'SD' : 'RAW') : '')))
