@@ -75,3 +75,16 @@ test('the solo-game rule is unchanged by the lobby rule', () => {
   assert.equal(backDecision({ from: parseRoute('#/play'), to: parseRoute('#/'), gameActive: true, seated: false }), 'confirm');
   assert.equal(backDecision({ from: parseRoute('#/play'), to: parseRoute('#/'), gameActive: false, seated: true }), 'allow');
 });
+
+test('deck request, my-decks and admin routes', () => {
+  assert.equal(parseRoute('#/requests').name, 'requests');
+  assert.equal(parseRoute('#/my-decks').name, 'my-decks');
+  assert.equal(parseRoute('#/my-decks/new').name, 'deck-new');
+  assert.deepEqual(parseRoute('#/my-decks/abc/edit').params, { id: 'abc' });
+  assert.equal(parseRoute('#/admin/requests').name, 'admin-requests');
+  assert.deepEqual(parseRoute('#/admin/requests/6f1c').params, { id: '6f1c' });
+  for (const junk of ['#/admin', '#/admin/x', '#/admin/requests/a/b', '#/requests/1', '#/my-decks/a']) assert.equal(parseRoute(junk).name, 'menu', junk);
+  for (const p of [paths.requests(), paths.myDecks(), paths.newDeck(), paths.editDeck('a b'), paths.adminRequests(), paths.adminRequest('x/y')]) {
+    assert.equal(parseRoute(toHash(p)).path, p);                                // paths round-trip through the parser
+  }
+});

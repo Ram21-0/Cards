@@ -1,0 +1,43 @@
+/* Deck requests, My decks, deck form, admin. Everything is scoped under .dk; shared pieces (.panel, .btn, .field, .chip, .topbar, .notice) come from style.css. */
+.dk { gap: 14px; max-width: 760px; width: 100%; margin: 0 auto; }
+.dk .field { max-width: none; }
+.dk textarea.field { resize: vertical; }
+.dk h3 { margin: 0; }
+.dk-form { gap: 14px; }
+.dk-field { display: flex; flex-direction: column; gap: 6px; }
+.dk-label { font-size: 13px; font-weight: 600; color: var(--muted); }
+.dk-hint { margin: 0; font-size: 13px; color: var(--muted); }
+.dk-empty { margin: 8px 0; color: var(--muted); text-align: center; }
+.dk-left { justify-content: flex-start; }
+.dk-list { display: flex; flex-direction: column; gap: 12px; }
+.dk-item { gap: 8px; text-align: left; }
+.dk-link { color: inherit; cursor: pointer; font: inherit; width: 100%; }
+.dk-link:hover { border-color: var(--accent); }
+.dk-head { display: flex; justify-content: space-between; align-items: flex-start; gap: 10px; flex-wrap: wrap; }
+.dk-badge { font-size: 12px; font-weight: 700; padding: 3px 10px; border-radius: 99px; border: 1px solid var(--line); white-space: nowrap; }
+.dk-badge.wait { color: var(--clash); border-color: var(--clash); }
+.dk-badge.good { color: var(--win); border-color: var(--win); }
+.dk-badge.bad { color: var(--loss); border-color: var(--loss); }
+.dk-badge.info { color: var(--muted); }
+.dk-note { margin: 0; padding: 8px 12px; border-radius: 10px; background: var(--bg-2); border-left: 3px solid var(--line); overflow-wrap: anywhere; }
+.dk-note.good { border-color: var(--win); }
+.dk-note.bad { border-color: var(--loss); }
+.dk-note.wait { border-color: var(--clash); }
+.dk-names { margin: 6px 0 0; color: var(--muted); overflow-wrap: anywhere; }
+.dk-problems, .dk-errors { margin: 0; padding-left: 20px; color: var(--loss); font-size: 14px; }
+.dk-problems:empty { display: none; }
+.dk-errors { color: var(--text); }
+.dk-errors-pre { margin: 0; padding: 10px; background: var(--bg-2); border-left: 3px solid var(--loss); white-space: pre-wrap; overflow-wrap: anywhere; font: inherit; font-size: 14px; }
+.dk-file { color: var(--muted); max-width: 100%; }
+.dk-filter { display: flex; }
+.dk-statrows { display: flex; flex-direction: column; gap: 10px; }
+.dk-statrow { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; align-items: center; padding: 10px; border: 1px solid var(--line); border-radius: 12px; }
+.dk-statrow .field { padding: 8px 10px; }
+.dk-statrow [hidden] { display: none; }
+.dk-check { display: flex; align-items: center; gap: 8px; }
+.dk-table-wrap { overflow-x: auto; }
+.dk-table { border-collapse: collapse; width: 100%; font-size: 13px; }
+.dk-table th, .dk-table td { padding: 6px 8px; border-bottom: 1px solid var(--line); text-align: left; white-space: nowrap; }
+.dk-table th { color: var(--muted); font-weight: 600; }
+.dk-thumb { width: 36px; height: 36px; object-fit: cover; border-radius: 6px; display: block; background: var(--bg-2); }
+@media (min-width: 640px) { .dk-statrow { grid-template-columns: 1.2fr 1.2fr auto 1.6fr 1fr; } }
