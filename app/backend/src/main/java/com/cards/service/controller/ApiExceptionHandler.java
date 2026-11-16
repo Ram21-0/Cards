@@ -60,6 +60,24 @@ public class ApiExceptionHandler {
         return error(HttpStatus.BAD_REQUEST, "Invalid request body");
     }
 
+    /** An upload beyond the multipart limits. */
+    @ExceptionHandler(org.springframework.web.multipart.MaxUploadSizeExceededException.class)
+    public ResponseEntity<Map<String, String>> tooLarge(org.springframework.web.multipart.MaxUploadSizeExceededException e) {
+        return error(HttpStatus.PAYLOAD_TOO_LARGE, "The upload is too large");
+    }
+
+    @ExceptionHandler({org.springframework.web.bind.MissingServletRequestParameterException.class, org.springframework.web.multipart.support.MissingServletRequestPartException.class})
+    public ResponseEntity<Map<String, String>> missingPart(Exception e) {
+        String name = e instanceof org.springframework.web.bind.MissingServletRequestParameterException p ? p.getParameterName()
+                : ((org.springframework.web.multipart.support.MissingServletRequestPartException) e).getRequestPartName();
+        return error(HttpStatus.BAD_REQUEST, name + " is required");
+    }
+
+    @ExceptionHandler(org.springframework.web.multipart.MultipartException.class)
+    public ResponseEntity<Map<String, String>> notMultipart(org.springframework.web.multipart.MultipartException e) {
+        return error(HttpStatus.BAD_REQUEST, "Send the upload as multipart/form-data");
+    }
+
     private static ResponseEntity<Map<String, String>> error(HttpStatus status, String message) {
         return ResponseEntity.status(status).body(Map.of("error", message));
     }

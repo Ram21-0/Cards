@@ -35,6 +35,14 @@ public class DeckRequestController {
         return DeckRequestResponse.from(requests.create(me, body.category(), body.description(), body.names()));
     }
 
+    /** Withdraws one of my requests that is still pending. */
+    @org.springframework.web.bind.annotation.DeleteMapping("/{id}")
+    public org.springframework.http.ResponseEntity<Void> withdraw(@AuthenticationPrincipal Player me, @PathVariable UUID id) {
+        rateLimiter.check(me.id());
+        requests.withdraw(me, id);
+        return org.springframework.http.ResponseEntity.noContent().build();
+    }
+
     @GetMapping
     public List<DeckRequestResponse> mine(@AuthenticationPrincipal Player me) {
         return requests.mine(me).stream().map(DeckRequestResponse::from).toList();

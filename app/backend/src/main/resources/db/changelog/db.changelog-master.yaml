@@ -13,3 +13,5 @@ databaseChangeLog:
       file: db/changelog/changes/005-result-hold.yaml
   - include:
       file: db/changelog/changes/006-deck-requests.yaml
+  - include:
+      file: db/changelog/changes/007-decks-of-your-own.yaml

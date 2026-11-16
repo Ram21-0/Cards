@@ -2,6 +2,7 @@ package com.cards.service.db;
 
 import com.cards.common.DeckRequest;
 import com.cards.common.DeckRequestStatus;
+import com.cards.common.DeckRequestType;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -33,6 +34,7 @@ public class DeckRequestRepository {
     private RowMapper<DeckRequest> mapper() {
         return (rs, i) -> DeckRequest.builder()
                 .id(rs.getObject("id", UUID.class))
+                .type(DeckRequestType.get(rs.getInt("type")))
                 .requesterId(rs.getObject("requester_id", UUID.class))
                 .requesterUsername(rs.getString("requester_username"))
                 .category(rs.getString("category"))
@@ -91,6 +93,34 @@ public class DeckRequestRepository {
                 values (?, ?, ?, ?::jsonb, ?) returning id""", UUID.class, requesterId, category, description, writeNames(names), Timestamp.from(now));
     }
 
+    /** A request to make an existing deck global; the deck is {@code resulting_deck_id}, the names are a snapshot of its cards. */
+    public UUID insertPromotion(UUID requesterId, UUID deckId, String category, String description, List<String> names, Instant now) {
+        return jdbc.queryForObject("""
+                insert into deck_requests (requester_id, category, description, names, created_at, type, resulting_deck_id)
+                values (?, ?, ?, ?::jsonb, ?, ?, ?) returning id""", UUID.class, requesterId, category, description, writeNames(names), Timestamp.from(now),
+                DeckRequestType.PROMOTE.dbVal(), deckId);
+    }
+
+    public boolean hasOpenPromotion(UUID deckId) {
+        return Boolean.TRUE.equals(jdbc.queryForObject("select exists (select 1 from deck_requests where resulting_deck_id = ? and type = 1 and status = 0)", Boolean.class, deckId));
+    }
+
+    /** The latest promotion request of each of this owner's decks. */
+    public List<DeckRequest> latestPromotionsOf(UUID ownerId) {
+        return jdbc.query(SELECT + " where r.id in (select distinct on (resulting_deck_id) id from deck_requests where type = 1 and requester_id = ? order by resulting_deck_id, created_at desc)",
+                mapper(), ownerId);
+    }
+
+    /** A deck is going away: its still-open promotion requests go with it. */
+    public void deleteOpenPromotions(UUID deckId) {
+        jdbc.update("delete from deck_requests where resulting_deck_id = ? and type = 1 and status = 0", deckId);
+    }
+
+    /** The requester withdraws a request that is still pending. */
+    public boolean deletePending(UUID id, UUID requesterId) {
+        return jdbc.update("delete from deck_requests where id = ? and requester_id = ? and status = 0", id, requesterId) == 1;
+    }
+
     public Optional<DeckRequest> findById(UUID id) {
         return jdbc.query(SELECT + " where r.id = ?", mapper(), id).stream().findFirst();
     }
@@ -126,7 +156,7 @@ public class DeckRequestRepository {
     /** PENDING -> a decision; false when the request was no longer pending (someone decided first). */
     public boolean decide(UUID id, DeckRequestStatus status, String note, UUID decidedBy, UUID deckId, Instant now) {
         return jdbc.update("""
-                update deck_requests set status = ?, admin_note = ?, decided_by = ?, resulting_deck_id = ?, decided_at = ?
+                update deck_requests set status = ?, admin_note = ?, decided_by = ?, resulting_deck_id = coalesce(?, resulting_deck_id), decided_at = ?
                 where id = ? and status = ?""", status.dbVal(), note, decidedBy, deckId, Timestamp.from(now), id, DeckRequestStatus.PENDING.dbVal()) == 1;
     }
 }

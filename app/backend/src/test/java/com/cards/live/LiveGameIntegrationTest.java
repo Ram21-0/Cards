@@ -704,4 +704,88 @@ class LiveGameIntegrationTest {
         }
         return actors;
     }
+
+    // ------------------------------------------------------------------------------------------ a private uploaded deck in a live game
+
+    private String uploadPrivateDeck(String token) throws Exception {
+        StringBuilder csv = new StringBuilder("name,image,rank,power\n");
+        Object[] zipEntries = new Object[16];
+        for (int i = 1; i <= 8; i++) {
+            csv.append("Fighter ").append(i).append(",f").append(i).append(".jpg,").append(i).append(',').append(10 + i).append('\n');
+            zipEntries[(i - 1) * 2] = "f" + i + ".jpg";
+            zipEntries[(i - 1) * 2 + 1] = com.cards.deckimport.TestImagesAccess.jpeg(120, 90);
+        }
+        org.springframework.util.LinkedMultiValueMap<String, Object> parts = new org.springframework.util.LinkedMultiValueMap<>();
+        parts.add("csv", named("cards.csv", csv.toString().getBytes(java.nio.charset.StandardCharsets.UTF_8)));
+        parts.add("images", named("images.zip", com.cards.deckimport.TestImagesAccess.zip(zipEntries)));
+        parts.add("mapping", "{\"stats\":[{\"column\":\"rank\",\"label\":\"Rank\",\"higherWins\":false},{\"column\":\"power\",\"label\":\"Power\",\"higherWins\":true}]}");
+        parts.add("name", "Private fighters");
+        HttpHeaders h = new HttpHeaders();
+        h.setContentType(MediaType.MULTIPART_FORM_DATA);
+        h.add("X-Requested-With", "cards");
+        h.add(HttpHeaders.COOKIE, "session=" + token);
+        ResponseEntity<String> r = rest.exchange("/api/decks/import", HttpMethod.POST, new HttpEntity<>(parts, h), String.class);
+        assertEquals(201, r.getStatusCode().value(), r.getBody());
+        return json.readTree(r.getBody()).get("id").asText();
+    }
+
+    private static org.springframework.core.io.ByteArrayResource named(String filename, byte[] bytes) {
+        return new org.springframework.core.io.ByteArrayResource(bytes) {
+            @Override
+            public String getFilename() {
+                return filename;
+            }
+        };
+    }
+
+    @Test
+    void aPrivateUploadedDeckIsPlayedInALiveGameByEverybodySeatedWithItsImages() throws Exception {
+        String ann = signIn("pv_ann"), bob = signIn("pv_bob"), carl = signIn("pv_carl");
+        String deckId = uploadPrivateDeck(ann);
+
+        // only the owner can host with it; nobody outside the game can read it, a seated player can
+        call(HttpMethod.POST, "/api/games", bob, "{\"deckId\":\"" + deckId + "\",\"maxPlayers\":2}", 404);
+        JsonNode game = call(HttpMethod.POST, "/api/games", ann, "{\"deckId\":\"" + deckId + "\",\"maxPlayers\":2}", 201);
+        String code = game.get("joinCode").asText();
+        assertEquals("Private fighters", game.get("deck").get("name").asText());
+        call(HttpMethod.GET, "/api/decks/" + deckId + "/cards", bob, null, 404);                       // not seated yet
+        call(HttpMethod.POST, "/api/games/" + code + "/join", bob, null, 200);
+        JsonNode bobsCards = call(HttpMethod.GET, "/api/decks/" + deckId + "/cards", bob, null, 200);   // seated: may read the deck for the game
+        assertEquals(8, bobsCards.size());
+        call(HttpMethod.GET, "/api/decks/" + deckId + "/cards", carl, null, 404);                       // an outsider still cannot
+        call(HttpMethod.GET, "/api/decks/" + deckId, carl, null, 404);
+
+        Client annWs = LiveHarness.connect(port, code, ann, ORIGIN);
+        Client bobWs = LiveHarness.connect(port, code, bob, ORIGIN);
+        annWs.awaitType("lobby");
+        bobWs.awaitType("lobby");
+        call(HttpMethod.POST, "/api/games/" + code + "/start", ann, null, 200);
+
+        // each player's live view holds only their own cards, with the uploaded images and the uploader's stats
+        for (Client ws : new Client[]{annWs, bobWs}) {
+            JsonNode view = ws.awaitType("view");
+            JsonNode own = view.get("ownHand");
+            assertTrue(own.size() >= 1);
+            JsonNode card = own.get(0);
+            assertTrue(card.get("name").asText().startsWith("Fighter "));
+            assertTrue(card.get("img").asText().startsWith("/api/images/"), card.toString());
+            assertEquals(java.util.Set.of("rank", "power"), fieldNames(card.get("stats")));
+            ResponseEntity<byte[]> img = rest.getForEntity(card.get("img").asText(), byte[].class);
+            assertEquals(200, img.getStatusCode().value());
+            assertEquals("image/jpeg", img.getHeaders().getContentType().toString());
+        }
+        // after the game starts the deck is still readable by its players, and the owner keeps ownership
+        call(HttpMethod.GET, "/api/decks/" + deckId + "/cards", bob, null, 200);
+        call(HttpMethod.GET, "/api/decks/" + deckId + "/cards", carl, null, 404);
+        // the deck was used by a game now: it cannot be deleted
+        call(HttpMethod.DELETE, "/api/decks/" + deckId, ann, null, 409);
+        annWs.close();
+        bobWs.close();
+    }
+
+    private static java.util.Set<String> fieldNames(JsonNode node) {
+        java.util.Set<String> names = new java.util.HashSet<>();
+        node.fieldNames().forEachRemaining(names::add);
+        return names;
+    }
 }

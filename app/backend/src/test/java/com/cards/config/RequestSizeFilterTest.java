@@ -11,7 +11,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class RequestSizeFilterTest {
 
-    private final RequestSizeFilter filter = new RequestSizeFilter(1000, 5000);
+    private final RequestSizeFilter filter = new RequestSizeFilter(1000, 5000, 9000);
 
     private MockHttpServletResponse run(String path, int bytes) throws Exception {
         MockHttpServletRequest request = new MockHttpServletRequest("POST", path);
@@ -37,6 +37,14 @@ class RequestSizeFilterTest {
     void adminPathsGetTheBiggerLimit() throws Exception {
         assertEquals(200, run("/api/admin/deck-requests/x", 5000).getStatus());
         assertEquals(413, run("/api/admin/deck-requests/x", 5001).getStatus());
+    }
+
+    @Test
+    void deckUploadsGetTheUploadLimit() throws Exception {
+        assertEquals(200, run("/api/decks/import", 9000).getStatus());
+        assertEquals(413, run("/api/decks/import", 9001).getStatus());
+        assertEquals(200, run("/api/decks/abc/import", 9000).getStatus());
+        assertEquals(413, run("/api/decks/abc/copy", 1001).getStatus(), "other deck paths keep the small limit");
     }
 
     @Test

@@ -1,5 +1,6 @@
 package com.cards.service.controller;
 
+import com.cards.admin.AdminAccess;
 import com.cards.common.Deck;
 import com.cards.common.Player;
 import com.cards.service.controller.dto.CardResponse;
@@ -21,6 +22,7 @@ import java.util.UUID;
 public class DeckController {
 
     private final DeckService decks;
+    private final AdminAccess admin;
 
     @GetMapping
     public List<DeckResponse> list(@AuthenticationPrincipal Player me) {
@@ -29,12 +31,12 @@ public class DeckController {
 
     @GetMapping("/{id}")
     public DeckResponse get(@PathVariable UUID id, @AuthenticationPrincipal Player me) {
-        return DeckResponse.from(decks.get(id, me));
+        return DeckResponse.from(decks.get(id, me, admin.isAdmin(me)));
     }
 
     @GetMapping("/{id}/cards")
     public List<CardResponse> cards(@PathVariable UUID id, @AuthenticationPrincipal Player me) {
-        Deck deck = decks.get(id, me);
+        Deck deck = decks.get(id, me, admin.isAdmin(me));
         return decks.cardsOf(deck).stream().map(c -> CardResponse.from(c, deck)).toList();
     }
 }

@@ -1,0 +1,43 @@
+# Decks of your own: uploaded images, and promotion requests ("make my private deck global").
+#   deck_requests.type  0 CATEGORY (a suggested category, Flow 1), 1 PROMOTE (a request to make an existing private deck PUBLIC)   (DeckRequestType)
+# For a PROMOTE request, resulting_deck_id is the deck being promoted.
+databaseChangeLog:
+
+  - changeSet:
+      id: 050-images
+      author: cards
+      changes:
+        - createTable:
+            tableName: images
+            remarks: "uploaded card images after decoding and re-encoding; served at /api/images/{id}. Default ImageStore (swappable for S3/R2)."
+            columns:
+              - column: { name: id, type: uuid, defaultValueComputed: gen_random_uuid(), constraints: { primaryKey: true, primaryKeyName: images_pkey, nullable: false } }
+              - column: { name: owner_id, type: uuid }
+              - column: { name: content_type, type: text, constraints: { nullable: false } }
+              - column: { name: data, type: bytea, constraints: { nullable: false } }
+              - column: { name: width, type: int, constraints: { nullable: false } }
+              - column: { name: height, type: int, constraints: { nullable: false } }
+              - column: { name: created_at, type: timestamp with time zone, defaultValueComputed: now(), constraints: { nullable: false } }
+        - addForeignKeyConstraint:
+            constraintName: images_owner_fkey
+            baseTableName: images
+            baseColumnNames: owner_id
+            referencedTableName: players
+            referencedColumnNames: id
+            onDelete: SET NULL
+      rollback:
+        - dropTable: { tableName: images }
+
+  - changeSet:
+      id: 051-deck-request-type
+      author: cards
+      changes:
+        - addColumn:
+            tableName: deck_requests
+            columns:
+              - column: { name: type, type: smallint, defaultValueNumeric: 0, constraints: { nullable: false } }
+        - sql: ALTER TABLE deck_requests ADD CONSTRAINT deck_requests_type_check CHECK (type IN (0, 1))
+        - sql: CREATE UNIQUE INDEX deck_requests_one_open_promotion ON deck_requests (resulting_deck_id) WHERE type = 1 AND status = 0
+      rollback:
+        - sql: DROP INDEX deck_requests_one_open_promotion
+        - dropColumn: { tableName: deck_requests, columnName: type }

@@ -9,7 +9,9 @@ import com.cards.common.NotFoundException;
 import com.cards.common.Player;
 import com.cards.common.TooManyRequestsException;
 import com.cards.common.Visibility;
-import com.cards.deckimport.DeckCardImport;
+import com.cards.common.DeckRequestType;
+import com.cards.deckimport.StatImportParser;
+import com.cards.deckimport.StatSpec;
 import com.cards.service.db.CardRepository;
 import com.cards.service.db.DeckRepository;
 import com.cards.service.db.DeckRequestRepository;
@@ -41,9 +43,10 @@ class DeckRequestServiceTest {
     private final DeckRequestRepository requests = mock(DeckRequestRepository.class);
     private final DeckRepository decks = mock(DeckRepository.class);
     private final CardRepository cards = mock(CardRepository.class);
+    private final DeckImportService imports = mock(DeckImportService.class);
     private final DeckRequestNotifier notifier = mock(DeckRequestNotifier.class);
     private final TestClock clock = TestClock.atNow();
-    private final DeckRequestService service = new DeckRequestService(requests, decks, cards, notifier, clock, "Wrestling");
+    private final DeckRequestService service = new DeckRequestService(requests, decks, cards, imports, notifier, clock, "Wrestling");
 
     private final Player ann = Player.builder().id(UUID.randomUUID()).username("ann").build();
     private final Player admin = Player.builder().id(UUID.randomUUID()).username("boss").build();
@@ -254,28 +257,43 @@ class DeckRequestServiceTest {
     }
 
     @Test
-    void importingCopiesTheWrestlingStatsOnceAndReplacesTheCards() {
+    void importingGoesThroughTheSharedPipelineWithTheTemplateDecksStats() {
         DeckRequest r = approved(DeckRequestStatus.APPROVED_GLOBAL, 0, false);
         UUID template = UUID.randomUUID();
         when(requests.findByIdForUpdate(r.id())).thenReturn(Optional.of(r));
         when(requests.findById(r.id())).thenReturn(Optional.of(r));
-        when(decks.statCount(r.resultingDeckId())).thenReturn(0);
         when(decks.findTemplateId("Wrestling")).thenReturn(Optional.of(template));
+        when(decks.findById(template)).thenReturn(Optional.of(com.cards.common.Deck.builder().id(template).stats(List.of(
+                com.cards.common.StatDefinition.builder().key("rank").label("Rank").valueType(com.cards.common.ValueType.INT)
+                        .comparisonStrategy(com.cards.common.ComparisonStrategy.LOWER_WINS).displayFormat(com.cards.common.DisplayFormat.PLAIN).displayOrder(1).build())).build()));
 
         service.importCsv(r.id(), CSV);
 
-        verify(decks).copyStats(template, r.resultingDeckId());
         @SuppressWarnings("unchecked")
-        ArgumentCaptor<List<DeckCardImport>> imported = ArgumentCaptor.forClass(List.class);
-        verify(cards).replaceAll(eq(r.resultingDeckId()), imported.capture());
-        assertEquals(8, imported.getValue().size());
-        assertEquals("B", imported.getValue().get(1).name());
-        assertEquals(new BigDecimal("41.5"), imported.getValue().get(1).chest());
-        assertNull(imported.getValue().get(2).brand());
+        ArgumentCaptor<List<StatSpec>> specs = ArgumentCaptor.forClass(List.class);
+        ArgumentCaptor<StatImportParser.Table> table = ArgumentCaptor.forClass(StatImportParser.Table.class);
+        verify(imports).fillRequestedDeck(eq(r.resultingDeckId()), eq(r.requesterId()), table.capture(), specs.capture());
+        assertEquals(8, table.getValue().rows().size());
+        assertEquals("rank", specs.getValue().get(0).key());
+        assertEquals(false, specs.getValue().get(0).higherWins());
+    }
 
-        when(decks.statCount(r.resultingDeckId())).thenReturn(6);                // a second import keeps the stats it has
-        service.importCsv(r.id(), CSV);
-        verify(decks, times(1)).copyStats(any(), any());
+    @Test
+    void jsonCardsBecomeTheSameTable() {
+        DeckRequest r = approved(DeckRequestStatus.APPROVED_GLOBAL, 0, false);
+        when(requests.findByIdForUpdate(r.id())).thenReturn(Optional.of(r));
+        when(requests.findById(r.id())).thenReturn(Optional.of(r));
+        UUID template = UUID.randomUUID();
+        when(decks.findTemplateId("Wrestling")).thenReturn(Optional.of(template));
+        when(decks.findById(template)).thenReturn(Optional.of(com.cards.common.Deck.builder().id(template).stats(List.of()).build()));
+
+        service.importCards(r.id(), List.of(java.util.Map.of("Name", "A", "rank", 1, "chest", 38.5), java.util.Map.of("name", "B", "rank", 2)));
+
+        ArgumentCaptor<StatImportParser.Table> table = ArgumentCaptor.forClass(StatImportParser.Table.class);
+        verify(imports).fillRequestedDeck(eq(r.resultingDeckId()), eq(r.requesterId()), table.capture(), any());
+        assertEquals("A", table.getValue().rows().get(0).get("name"));
+        assertEquals("1", table.getValue().rows().get(0).get("rank"));
+        assertThrows(BadRequestException.class, () -> service.importCards(r.id(), List.of()));
     }
 
     @Test
@@ -289,7 +307,7 @@ class DeckRequestServiceTest {
         assertEquals("Approve the request first", assertThrows(ConflictException.class, () -> service.publish(rejected.id())).getMessage());
         assertEquals("The deck is already live", assertThrows(ConflictException.class, () -> service.importCsv(live.id(), CSV)).getMessage());
         assertEquals("The deck is already live", assertThrows(ConflictException.class, () -> service.publish(live.id())).getMessage());
-        verify(cards, never()).replaceAll(any(), any());
+        verify(imports, never()).fillRequestedDeck(any(), any(), any(), any());
         verify(decks, never()).publish(any(), any(), any());
     }
 
@@ -311,12 +329,109 @@ class DeckRequestServiceTest {
     }
 
     @Test
-    void badImportsAreRefusedBeforeAnythingIsWritten() {
+    void anUnreadableCsvIsRefusedBeforeAnythingIsWritten() {
         DeckRequest r = approved(DeckRequestStatus.APPROVED_GLOBAL, 0, false);
         when(requests.findByIdForUpdate(r.id())).thenReturn(Optional.of(r));
-        assertThrows(BadRequestException.class, () -> service.importCsv(r.id(), "name,rank\nA,1"));
-        assertThrows(BadRequestException.class, () -> service.importCards(r.id(), List.of()));
-        verify(cards, never()).replaceAll(any(), any());
-        verify(decks, never()).copyStats(any(), any());
+        assertThrows(BadRequestException.class, () -> service.importCsv(r.id(), "  "));
+        verify(imports, never()).fillRequestedDeck(any(), any(), any(), any());
+    }
+
+    // ---------------------------------------------------------------- promotion of a private deck
+
+    private com.cards.common.Deck privateDeck(int cards) {
+        return com.cards.common.Deck.builder().id(UUID.randomUUID()).ownerId(ann.id()).name("My deck").description("d").visibility(Visibility.PRIVATE)
+                .cardCount(cards).stats(List.of(com.cards.common.StatDefinition.builder().key("rank").build())).build();
+    }
+
+    @Test
+    void theOwnerAsksToMakeAPrivateDeckGlobalAndTheAdminIsMailed() {
+        com.cards.common.Deck deck = privateDeck(9);
+        when(decks.findById(deck.id())).thenReturn(Optional.of(deck));
+        when(cards.findByDeck(deck.id())).thenReturn(List.of(com.cards.common.Card.builder().name("A").build(), com.cards.common.Card.builder().name("B").build()));
+        UUID id = UUID.randomUUID();
+        DeckRequest created = stored(DeckRequestStatus.PENDING).toBuilder().id(id).type(DeckRequestType.PROMOTE).resultingDeckId(deck.id()).build();
+        when(requests.insertPromotion(eq(ann.id()), eq(deck.id()), eq("My deck"), eq("d"), eq(List.of("A", "B")), any())).thenReturn(id);
+        when(requests.findById(id)).thenReturn(Optional.of(created));
+
+        assertEquals(created, service.createPromotion(ann, deck.id()));
+        verify(notifier).created(created);
+    }
+
+    @Test
+    void promotionNeedsTheOwnerAPrivateReadyDeckAndOnlyOneOpenRequest() {
+        com.cards.common.Deck deck = privateDeck(9);
+        when(decks.findById(deck.id())).thenReturn(Optional.of(deck));
+        Player eve = Player.builder().id(UUID.randomUUID()).username("eve").build();
+        assertThrows(NotFoundException.class, () -> service.createPromotion(eve, deck.id()));
+        assertEquals("Choose a username first", assertThrows(BadRequestException.class, () -> service.createPromotion(Player.builder().id(ann.id()).build(), deck.id())).getMessage());
+
+        com.cards.common.Deck pub = privateDeck(9).toBuilder().visibility(Visibility.PUBLIC).build();
+        when(decks.findById(pub.id())).thenReturn(Optional.of(pub));
+        assertEquals("The deck is already public", assertThrows(ConflictException.class, () -> service.createPromotion(ann, pub.id())).getMessage());
+        com.cards.common.Deck small = privateDeck(5);
+        when(decks.findById(small.id())).thenReturn(Optional.of(small));
+        assertEquals("The deck needs at least 8 cards", assertThrows(ConflictException.class, () -> service.createPromotion(ann, small.id())).getMessage());
+
+        when(requests.hasOpenPromotion(deck.id())).thenReturn(true);
+        assertEquals("A request to make this deck global is already open", assertThrows(ConflictException.class, () -> service.createPromotion(ann, deck.id())).getMessage());
+        verify(requests, never()).insertPromotion(any(), any(), any(), any(), any(), any());
+        verify(notifier, never()).created(any());
+    }
+
+    @Test
+    void promotionRequestsCountTowardTheSameLimits() {
+        com.cards.common.Deck deck = privateDeck(9);
+        when(decks.findById(deck.id())).thenReturn(Optional.of(deck));
+        when(requests.countPending(ann.id())).thenReturn(3);
+        assertThrows(ConflictException.class, () -> service.createPromotion(ann, deck.id()));
+        when(requests.countPending(ann.id())).thenReturn(0);
+        when(requests.countSince(eq(ann.id()), any())).thenReturn(5);
+        assertThrows(TooManyRequestsException.class, () -> service.createPromotion(ann, deck.id()));
+    }
+
+    @Test
+    void approvingAPromotionMakesTheDeckPublicAndPublishedAtOnce() {
+        UUID deckId = UUID.randomUUID();
+        DeckRequest promo = stored(DeckRequestStatus.PENDING).toBuilder().type(DeckRequestType.PROMOTE).resultingDeckId(deckId).build();
+        when(requests.findByIdForUpdate(promo.id())).thenReturn(Optional.of(promo));
+        when(requests.findById(promo.id())).thenReturn(Optional.of(promo));
+        when(requests.decide(eq(promo.id()), eq(DeckRequestStatus.APPROVED_GLOBAL), eq("fine"), eq(admin.id()), eq(deckId), any())).thenReturn(true);
+
+        service.approve(promo.id(), admin, null, "fine");                          // visibility may be left out: a promotion is always PUBLIC
+
+        verify(decks).publish(eq(deckId), eq(Visibility.PUBLIC), any());
+        verify(requests).markPublished(eq(promo.id()), any());
+        verify(decks, never()).insertNotLive(any(), any(), any());
+        assertEquals("A promotion can only be approved as PUBLIC", assertThrows(BadRequestException.class, () -> service.approve(promo.id(), admin, "PRIVATE", null)).getMessage());
+    }
+
+    @Test
+    void rejectingAPromotionLeavesTheDeckPrivateAndAPromotionCannotBeImportedPublishedOrEdited() {
+        UUID deckId = UUID.randomUUID();
+        DeckRequest promo = stored(DeckRequestStatus.PENDING).toBuilder().type(DeckRequestType.PROMOTE).resultingDeckId(deckId).build();
+        when(requests.findByIdForUpdate(promo.id())).thenReturn(Optional.of(promo));
+        when(requests.findById(promo.id())).thenReturn(Optional.of(promo));
+        when(requests.decide(eq(promo.id()), eq(DeckRequestStatus.REJECTED), eq("Not now"), eq(admin.id()), eq(null), any())).thenReturn(true);
+        service.reject(promo.id(), admin, "Not now");
+        verify(decks, never()).publish(any(), any(), any());
+
+        assertThrows(ConflictException.class, () -> service.edit(promo.id(), null, null, names(3)));
+        assertEquals("This is a promotion request: approve or reject it", assertThrows(ConflictException.class, () -> service.importCsv(promo.id(), CSV)).getMessage());
+        assertEquals("This is a promotion request: approve or reject it", assertThrows(ConflictException.class, () -> service.publish(promo.id())).getMessage());
+    }
+
+    @Test
+    void aPendingRequestCanBeWithdrawnByItsRequesterOnly() {
+        DeckRequest pending = stored(DeckRequestStatus.PENDING);
+        when(requests.findById(pending.id())).thenReturn(Optional.of(pending));
+        when(requests.deletePending(pending.id(), ann.id())).thenReturn(true);
+        service.withdraw(ann, pending.id());
+        verify(requests).deletePending(pending.id(), ann.id());
+
+        Player eve = Player.builder().id(UUID.randomUUID()).username("eve").build();
+        assertThrows(NotFoundException.class, () -> service.withdraw(eve, pending.id()));
+        DeckRequest done = stored(DeckRequestStatus.REJECTED);
+        when(requests.findById(done.id())).thenReturn(Optional.of(done));
+        assertEquals("Only a pending request can be withdrawn", assertThrows(ConflictException.class, () -> service.withdraw(ann, done.id())).getMessage());
     }
 }

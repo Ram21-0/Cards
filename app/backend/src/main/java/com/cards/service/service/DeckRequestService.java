@@ -5,14 +5,14 @@ import com.cards.common.ConflictException;
 import com.cards.common.Deck;
 import com.cards.common.DeckRequest;
 import com.cards.common.DeckRequestStatus;
+import com.cards.common.DeckRequestType;
 import com.cards.common.NotFoundException;
 import com.cards.common.Player;
 import com.cards.common.ServiceUnavailableException;
 import com.cards.common.TooManyRequestsException;
 import com.cards.common.Visibility;
-import com.cards.deckimport.DeckCardImport;
 import com.cards.deckimport.StatImportParser;
-import com.cards.deckimport.StatImportValidator;
+import com.cards.deckimport.StatSpec;
 import com.cards.service.db.CardRepository;
 import com.cards.service.db.DeckRepository;
 import com.cards.service.db.DeckRequestRepository;
@@ -28,6 +28,7 @@ import java.util.ArrayList;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Locale;
+import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
 
@@ -48,15 +49,17 @@ public class DeckRequestService {
     private final DeckRequestRepository requests;
     private final DeckRepository decks;
     private final CardRepository cards;
+    private final DeckImportService imports;
     private final DeckRequestNotifier notifier;
     private final Clock clock;
     private final String templateDeckName;
 
-    public DeckRequestService(DeckRequestRepository requests, DeckRepository decks, CardRepository cards, DeckRequestNotifier notifier, Clock clock,
-                              @Value("${app.deck-requests.template-deck:Wrestling}") String templateDeckName) {
+    public DeckRequestService(DeckRequestRepository requests, DeckRepository decks, CardRepository cards, DeckImportService imports,
+                              DeckRequestNotifier notifier, Clock clock, @Value("${app.deck-requests.template-deck:Wrestling}") String templateDeckName) {
         this.requests = requests;
         this.decks = decks;
         this.cards = cards;
+        this.imports = imports;
         this.notifier = notifier;
         this.clock = clock;
         this.templateDeckName = templateDeckName;
@@ -72,6 +75,14 @@ public class DeckRequestService {
         String cleanDescription = cleanDescription(description);
         List<String> cleanNames = cleanNames(names);
 
+        checkLimits(me);
+        UUID id = requests.insert(me.id(), cleanCategory, cleanDescription, cleanNames, clock.instant());
+        DeckRequest created = requests.findById(id).orElseThrow();
+        afterCommit(() -> notifier.created(created));
+        return created;
+    }
+
+    private void checkLimits(Player me) {
         requests.lockRequester(me.id());                                         // two simultaneous requests cannot both slip under a limit
         if (requests.countPending(me.id()) >= MAX_PENDING_PER_USER) {
             throw new ConflictException("You already have " + MAX_PENDING_PER_USER + " pending requests; wait for a decision");
@@ -79,10 +90,36 @@ public class DeckRequestService {
         if (requests.countSince(me.id(), clock.instant().minus(Duration.ofDays(1))) >= MAX_PER_DAY) {
             throw new TooManyRequestsException("You can send " + MAX_PER_DAY + " requests per day; try again tomorrow");
         }
-        UUID id = requests.insert(me.id(), cleanCategory, cleanDescription, cleanNames, clock.instant());
+    }
+
+    /**
+     * The owner of a PRIVATE deck asks to make it global. One open request per deck; counts toward the same limits as a category request.
+     * The admin is mailed like for any request.
+     */
+    @Transactional
+    public DeckRequest createPromotion(Player me, UUID deckId) {
+        if (me.username() == null) throw new BadRequestException("Choose a username first");
+        Deck deck = decks.findById(deckId).orElseThrow(() -> new NotFoundException("Deck not found"));
+        DeckImportService.requireOwner(deck, me);
+        if (deck.visibility() == Visibility.PUBLIC) throw new ConflictException("The deck is already public");
+        if (!deck.playable() || deck.cardCount() == null || deck.cardCount() < StatImportMin.CARDS) {
+            throw new ConflictException("The deck needs at least " + StatImportMin.CARDS + " cards");
+        }
+        checkLimits(me);
+        if (requests.hasOpenPromotion(deckId)) throw new ConflictException("A request to make this deck global is already open");
+        List<String> names = cards.findByDeck(deckId).stream().map(com.cards.common.Card::name).toList();
+        UUID id = requests.insertPromotion(me.id(), deckId, deck.name(), deck.description(), names, clock.instant());
         DeckRequest created = requests.findById(id).orElseThrow();
         afterCommit(() -> notifier.created(created));
         return created;
+    }
+
+    /** The requester withdraws a request that is still pending. */
+    @Transactional
+    public void withdraw(Player me, UUID id) {
+        DeckRequest r = requests.findById(id).filter(x -> me.id().equals(x.requesterId())).orElseThrow(() -> new NotFoundException("Request not found"));
+        if (r.status() != DeckRequestStatus.PENDING) throw new ConflictException("Only a pending request can be withdrawn");
+        if (!requests.deletePending(id, me.id())) throw new ConflictException("The request was decided meanwhile");
     }
 
     @Transactional(readOnly = true)
@@ -115,6 +152,7 @@ public class DeckRequestService {
     public DeckRequest edit(UUID id, String category, String description, List<String> names) {
         DeckRequest r = requests.findByIdForUpdate(id).orElseThrow(() -> new NotFoundException("Request not found"));
         requirePending(r);
+        if (r.type() == DeckRequestType.PROMOTE) throw new ConflictException("A promotion request cannot be edited");
         requests.updateContent(id,
                 category == null ? r.category() : cleanCategory(category),
                 description == null ? r.description() : cleanDescription(description),
@@ -128,14 +166,25 @@ public class DeckRequestService {
      */
     @Transactional
     public DeckRequest approve(UUID id, Player admin, String visibility, String note) {
-        Visibility chosen = parseVisibility(visibility);
         String cleanNote = cleanNote(note, false);
         DeckRequest r = requests.findByIdForUpdate(id).orElseThrow(() -> new NotFoundException("Request not found"));
         requirePending(r);
+        Visibility chosen = r.type() == DeckRequestType.PROMOTE && (visibility == null || visibility.isBlank()) ? Visibility.PUBLIC : parseVisibility(visibility);
+        if (r.type() == DeckRequestType.PROMOTE) return approvePromotion(r, admin, chosen, cleanNote);
         UUID deckId = decks.insertNotLive(r.requesterId(), r.category(), r.description());
         DeckRequestStatus status = chosen == Visibility.PUBLIC ? DeckRequestStatus.APPROVED_GLOBAL : DeckRequestStatus.APPROVED_PRIVATE;
         if (!requests.decide(id, status, cleanNote, admin.id(), deckId, clock.instant())) throw new ConflictException("The request was decided meanwhile");
         return requests.findById(id).orElseThrow();
+    }
+
+    /** The owner's private deck becomes PUBLIC at once (the owner keeps it); the request is closed as published. */
+    private DeckRequest approvePromotion(DeckRequest r, Player admin, Visibility chosen, String note) {
+        if (chosen != Visibility.PUBLIC) throw new BadRequestException("A promotion can only be approved as PUBLIC");
+        if (r.resultingDeckId() == null) throw new ConflictException("The deck is gone");
+        if (!requests.decide(r.id(), DeckRequestStatus.APPROVED_GLOBAL, note, admin.id(), r.resultingDeckId(), clock.instant())) throw new ConflictException("The request was decided meanwhile");
+        decks.publish(r.resultingDeckId(), Visibility.PUBLIC, clock.instant());
+        requests.markPublished(r.id(), clock.instant());
+        return requests.findById(r.id()).orElseThrow();
     }
 
     @Transactional
@@ -161,26 +210,36 @@ public class DeckRequestService {
     public record ImportedDeck(Deck deck, List<com.cards.common.Card> cards) {
     }
 
-    /** CSV text (header row: name, rank, fight, chest, biceps, height, weight, brand) or already typed cards: replaces all cards of the deck. */
+    /** CSV text (header row: name, rank, fight, chest, biceps, height, weight, brand, image) filling the deck of an approved category request. */
     @Transactional
     public DeckRequest importCsv(UUID id, String csv) {
-        return importStats(id, StatImportValidator.fromRows(StatImportParser.parseCsv(csv)));
+        return importTable(id, StatImportParser.parse(csv));
     }
 
+    /** The same from JSON: flat card objects like {"name": "A", "rank": 1, "fight": 44, ...}. */
     @Transactional
-    public DeckRequest importCards(UUID id, List<DeckCardImport> imported) {
-        return importStats(id, StatImportValidator.fromCards(imported == null ? List.of() : imported));
+    public DeckRequest importCards(UUID id, List<Map<String, Object>> cardObjects) {
+        if (cardObjects == null || cardObjects.isEmpty()) throw new BadRequestException("A deck needs at least " + StatImportMin.CARDS + " cards");
+        List<String> header = new ArrayList<>();
+        List<Map<String, String>> rows = new ArrayList<>();
+        for (Map<String, Object> card : cardObjects) {
+            Map<String, String> row = new java.util.LinkedHashMap<>();
+            if (card != null) card.forEach((k, v) -> {
+                String key = k.trim().toLowerCase(Locale.ROOT);
+                if (!header.contains(key)) header.add(key);
+                row.put(key, v == null ? "" : v.toString().trim());
+            });
+            rows.add(row);
+        }
+        return importTable(id, new StatImportParser.Table(header, rows));
     }
 
-    private DeckRequest importStats(UUID id, List<DeckCardImport> validated) {
+    private DeckRequest importTable(UUID id, StatImportParser.Table table) {
         DeckRequest r = requests.findByIdForUpdate(id).orElseThrow(() -> new NotFoundException("Request not found"));
         requireApprovedAndNotLive(r);
-        UUID deckId = r.resultingDeckId();
-        if (decks.statCount(deckId) == 0) {                                      // the six Wrestling stats: same keys, units and strategies
-            UUID template = decks.findTemplateId(templateDeckName).orElseThrow(() -> new ServiceUnavailableException("The template deck '" + templateDeckName + "' is missing"));
-            decks.copyStats(template, deckId);
-        }
-        cards.replaceAll(deckId, validated);
+        UUID template = decks.findTemplateId(templateDeckName).orElseThrow(() -> new ServiceUnavailableException("The template deck '" + templateDeckName + "' is missing"));
+        List<StatSpec> specs = decks.findById(template).orElseThrow().stats().stream().map(StatSpec::fromDefinition).toList();
+        imports.fillRequestedDeck(r.resultingDeckId(), r.requesterId(), table, specs);
         return requests.findById(id).orElseThrow();
     }
 
@@ -189,8 +248,8 @@ public class DeckRequestService {
     public DeckRequest publish(UUID id) {
         DeckRequest r = requests.findByIdForUpdate(id).orElseThrow(() -> new NotFoundException("Request not found"));
         requireApprovedAndNotLive(r);
-        if (r.cardCount() < StatImportValidator.MIN_CARDS || decks.statCount(r.resultingDeckId()) == 0) {
-            throw new ConflictException("Import the card stats first (at least " + StatImportValidator.MIN_CARDS + " cards)");
+        if (r.cardCount() < StatImportMin.CARDS || decks.statCount(r.resultingDeckId()) == 0) {
+            throw new ConflictException("Import the card stats first (at least " + StatImportMin.CARDS + " cards)");
         }
         decks.publish(r.resultingDeckId(), r.status() == DeckRequestStatus.APPROVED_GLOBAL ? Visibility.PUBLIC : Visibility.PRIVATE, clock.instant());
         requests.markPublished(id, clock.instant());
@@ -198,6 +257,7 @@ public class DeckRequestService {
     }
 
     private static void requireApprovedAndNotLive(DeckRequest r) {
+        if (r.type() == DeckRequestType.PROMOTE) throw new ConflictException("This is a promotion request: approve or reject it");
         if (!r.status().approved() || r.resultingDeckId() == null) throw new ConflictException("Approve the request first");
         if (r.publishedAt() != null) throw new ConflictException("The deck is already live");
     }
@@ -280,5 +340,13 @@ public class DeckRequestService {
         } else {
             task.run();
         }
+    }
+}
+
+/** The smallest deck that can be played (a game has up to 8 seats and every seat needs a card). */
+final class StatImportMin {
+    static final int CARDS = 8;
+
+    private StatImportMin() {
     }
 }

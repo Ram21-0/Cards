@@ -42,9 +42,14 @@ public class DeckService {
      * (the other players need its cards to play). A deck that is not live or has no stats is never readable.
      */
     public Deck get(UUID id, Player viewer) {
+        return get(id, viewer, false);
+    }
+
+    /** An admin may read any deck that is playable (to review an upload before making it global). */
+    public Deck get(UUID id, Player viewer, boolean admin) {
         return decks.findById(id)
                 .filter(Deck::playable)
-                .filter(d -> d.visibility() != Visibility.PRIVATE
+                .filter(d -> admin || d.visibility() != Visibility.PRIVATE
                         || (viewer != null && (viewer.id().equals(d.ownerId()) || decks.isSeatedWithDeck(viewer.id(), d.id()))))
                 .orElseThrow(() -> new NotFoundException("Deck " + id + " not found"));
     }

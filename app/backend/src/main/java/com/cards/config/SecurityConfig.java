@@ -44,6 +44,11 @@ public class SecurityConfig {
                         .requestMatchers(HttpMethod.OPTIONS, "/**").permitAll()
                         .requestMatchers("/api/me").authenticated()
                         .requestMatchers("/api/deck-requests", "/api/deck-requests/**").authenticated()
+                        .requestMatchers(HttpMethod.GET, "/api/decks/mine").authenticated()
+                        .requestMatchers(HttpMethod.POST, "/api/decks/**").authenticated()
+                        .requestMatchers(HttpMethod.PUT, "/api/decks/**").authenticated()
+                        .requestMatchers(HttpMethod.PATCH, "/api/decks/**").authenticated()
+                        .requestMatchers(HttpMethod.DELETE, "/api/decks/**").authenticated()
                         .requestMatchers("/api/admin/**").access((authentication, context) -> new AuthorizationDecision(
                                 authentication.get() instanceof SessionAuthentication session && session.getPrincipal() instanceof Player player && adminAccess.isAdmin(player)))   // anonymous -> 401, signed in but not an admin -> 403
                         .requestMatchers(HttpMethod.POST, "/api/games", "/api/games/*/join", "/api/games/*/cpu", "/api/games/*/leave",

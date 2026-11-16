@@ -58,7 +58,7 @@ class DeckRequestWebTest {
     @MockitoBean DeckRequestService requests;
     @MockitoBean RateLimiter rateLimiter;
 
-    private final DeckRequest sample = DeckRequest.builder().id(RID).requesterId(ANN.id()).requesterUsername("ann").category("Cricket legends")
+    private final DeckRequest sample = DeckRequest.builder().id(RID).type(com.cards.common.DeckRequestType.CATEGORY).requesterId(ANN.id()).requesterUsername("ann").category("Cricket legends")
             .description("d").names(List.of("A", "B", "C")).status(DeckRequestStatus.PENDING).createdAt(Instant.parse("2026-11-20T10:00:00Z")).build();
 
     @BeforeEach

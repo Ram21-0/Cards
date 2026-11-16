@@ -1,6 +1,6 @@
 package com.cards.service.db;
 
-import com.cards.deckimport.DeckCardImport;
+import com.cards.deckimport.ImportedCard;
 import com.cards.common.Card;
 import com.cards.common.Stat;
 import com.fasterxml.jackson.core.type.TypeReference;
@@ -32,26 +32,26 @@ public class CardRepository {
         return jdbc.queryForObject("select count(*) from cards where deck_id = ?", Integer.class, deckId);
     }
 
-    /** Replaces ALL cards of the deck with these (the stat import). The caller has validated them; stats are stored under the Wrestling keys. */
-    public void replaceAll(UUID deckId, List<DeckCardImport> imported) {
+    /** Replaces ALL cards of the deck with these (an import). Images must already be stored: {@code imageUrl} is what gets saved. */
+    public void replaceAll(UUID deckId, List<ImportedCard> imported) {
         jdbc.update("delete from cards where deck_id = ?", deckId);
-        jdbc.batchUpdate("insert into cards (deck_id, name, stats, meta) values (?, ?, ?::jsonb, ?::jsonb)", imported, 100, (ps, c) -> {
+        jdbc.batchUpdate("insert into cards (deck_id, name, img_url, stats, meta) values (?, ?, ?, ?::jsonb, ?::jsonb)", imported, 100, (ps, c) -> {
             ps.setObject(1, deckId);
             ps.setString(2, c.name());
-            ps.setString(3, write(statsOf(c)));
-            ps.setString(4, write(c.brand() == null ? Map.of() : Map.of("brand", c.brand())));
+            ps.setString(3, c.imageUrl());
+            ps.setString(4, write(c.stats()));
+            ps.setString(5, write(c.brand() == null ? Map.of() : Map.of("brand", c.brand())));
         });
     }
 
-    private static Map<String, Object> statsOf(DeckCardImport c) {
-        Map<String, Object> stats = new java.util.LinkedHashMap<>();
-        stats.put("rank", c.rank());
-        stats.put("fight", c.fight());
-        stats.put("chest", c.chest());
-        stats.put("biceps", c.biceps());
-        stats.put("height", c.height());
-        stats.put("weight", c.weight());
-        return stats;
+    /** The image addresses of a deck's cards (to clean up unused images after a deck is deleted or replaced). */
+    public List<String> imageUrlsOf(UUID deckId) {
+        return jdbc.queryForList("select img_url from cards where deck_id = ? and img_url is not null", String.class, deckId);
+    }
+
+    /** A private copy: the same cards (and the same stored images) in another deck with the same stat keys. */
+    public void copyCards(UUID fromDeck, UUID toDeck) {
+        jdbc.update("insert into cards (deck_id, name, img_url, stats, meta) select ?, name, img_url, stats, meta from cards where deck_id = ? order by id", toDeck, fromDeck);
     }
 
     private String write(Object value) {

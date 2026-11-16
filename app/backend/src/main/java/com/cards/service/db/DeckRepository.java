@@ -54,6 +54,49 @@ public class DeckRepository {
                 .stream().findFirst().map(this::withStats);
     }
 
+    public UUID insertDeck(UUID ownerId, String name, String description, Visibility visibility, boolean live) {
+        return jdbc.queryForObject("insert into decks (name, description, visibility, owner_id, live) values (?, ?, ?, ?, ?) returning id",
+                UUID.class, name, description, visibility.dbVal(), ownerId, live);
+    }
+
+    /** The stat definitions of an upload, in column order (display_order 1..n). */
+    public void insertStats(UUID deckId, List<com.cards.deckimport.StatSpec> specs) {
+        int order = 0;
+        for (com.cards.deckimport.StatSpec s : specs) {
+            order++;
+            jdbc.update("""
+                    insert into deck_stats (deck_id, key, label, unit, value_type, comparison_strategy, display_order, display_format)
+                    values (?, ?, ?, ?, ?, ?, ?, ?)""", deckId, s.key(), s.label(), s.unit(), s.valueType().dbVal(),
+                    (s.higherWins() ? ComparisonStrategy.HIGHER_WINS : ComparisonStrategy.LOWER_WINS).dbVal(), order, s.displayFormat().dbVal());
+        }
+    }
+
+    public void deleteStats(UUID deckId) {
+        jdbc.update("delete from deck_stats where deck_id = ?", deckId);
+    }
+
+    public void deleteDeck(UUID deckId) {
+        jdbc.update("delete from decks where id = ?", deckId);
+    }
+
+    public void rename(UUID deckId, String name, String description) {
+        jdbc.update("update decks set name = ?, description = ?, updated_at = now() where id = ?", name, description, deckId);
+    }
+
+    /** All decks a player owns (any visibility, live or not), newest first. */
+    public List<Deck> findOwnedBy(UUID ownerId) {
+        return jdbc.query(CARD_COUNT_SELECT + " where d.owner_id = ? order by d.created_at desc", DECK, ownerId).stream().map(this::withStats).toList();
+    }
+
+    public int countOwnedBy(UUID ownerId) {
+        return jdbc.queryForObject("select count(*) from decks where owner_id = ?", Integer.class, ownerId);
+    }
+
+    /** Games (any state) keep their deck, so a deck that was ever used cannot be deleted. */
+    public boolean isUsedByGames(UUID deckId) {
+        return Boolean.TRUE.equals(jdbc.queryForObject("select exists (select 1 from games where deck_id = ?)", Boolean.class, deckId));
+    }
+
     /** An approved request's deck: owned by the requester, PRIVATE and NOT live (no stats yet, so it is never listed or playable). */
     public UUID insertNotLive(UUID ownerId, String name, String description) {
         return jdbc.queryForObject("insert into decks (name, description, visibility, owner_id, live) values (?, ?, ?, ?, false) returning id",

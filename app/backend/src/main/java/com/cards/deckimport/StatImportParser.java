@@ -8,26 +8,28 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 
-/** Reads a CSV import (header row; columns in any order; quotes allowed) into raw rows of text, one map per card. */
+/** Reads a CSV (header row; columns in any order; quotes allowed) into rows of text, one map per card. */
 public final class StatImportParser {
 
-    public static final List<String> COLUMNS = List.of("name", "rank", "fight", "chest", "biceps", "height", "weight", "brand");
-    private static final List<String> REQUIRED = List.of("name", "rank", "fight", "chest", "biceps", "height", "weight");
     static final int MAX_ROWS = 600;
+    public static final int MAX_CSV_CHARS = 1_000_000;
+
+    /** A parsed CSV: the lower-cased, trimmed header and one map (header -> trimmed cell) per data row. */
+    public record Table(List<String> header, List<Map<String, String>> rows) {
+    }
 
     private StatImportParser() {
     }
 
-    /** @throws BadRequestException for a missing header column or an unreadable file */
-    public static List<Map<String, String>> parseCsv(String csv) {
+    /** @throws BadRequestException for an empty, oversized or unreadable CSV */
+    public static Table parse(String csv) {
         if (csv == null || csv.isBlank()) throw new BadRequestException("The CSV is empty");
+        if (csv.length() > MAX_CSV_CHARS) throw new BadRequestException("The CSV is larger than 1 MB");
         List<List<String>> records = records(csv.replace("\r\n", "\n").replace('\r', '\n').replaceFirst("^\\uFEFF", ""));
         if (records.isEmpty()) throw new BadRequestException("The CSV is empty");
         List<String> header = records.get(0).stream().map(h -> h.trim().toLowerCase(Locale.ROOT)).toList();
-        for (String column : REQUIRED) {
-            if (!header.contains(column)) throw new BadRequestException("The CSV needs a header row with: " + String.join(", ", COLUMNS) + " (brand is optional)");
-        }
-        if (records.size() - 1 > MAX_ROWS) throw new BadRequestException("At most " + MAX_ROWS + " cards per import");
+        if (header.stream().distinct().count() != header.size()) throw new BadRequestException("The CSV header has the same column twice");
+        if (records.size() - 1 > MAX_ROWS) throw new BadRequestException("At most " + MAX_ROWS + " rows per import");
         List<Map<String, String>> rows = new ArrayList<>();
         for (int i = 1; i < records.size(); i++) {
             List<String> fields = records.get(i);
@@ -35,7 +37,7 @@ public final class StatImportParser {
             for (int c = 0; c < header.size(); c++) row.put(header.get(c), c < fields.size() ? fields.get(c).trim() : "");
             rows.add(row);
         }
-        return rows;
+        return new Table(header, rows);
     }
 
     /** RFC 4180-ish: commas, double quotes with "" escaping, newlines inside quotes; blank lines are skipped. */

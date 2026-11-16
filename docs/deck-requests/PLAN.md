@@ -1,4 +1,4 @@
-# Deck requests: plan
+# Deck requests and decks of your own: plan
 
 Users ask for a new category (a deck); the admin gets an email, reviews the request, approves it as a **private** or **global** deck, and
 the deck goes live once it has stats. Branch: `deck_requests`. Backend only here; the frontend follows `API.md`.
@@ -44,3 +44,33 @@ no new PII (the admin sees the requester's username only), admin endpoints cover
 ## Stages
 1. Plan, changeset 006, user endpoints, admin allow-list + `isAdmin`, admin list/detail/edit/reject/approve, `EmailSender` + notification. Contract in `API.md`.
 2. 2a import + publish. 2b only after the user confirms.
+
+---
+
+## Two flows (addendum from the owner)
+- **Flow 1, category request** (sections A-F above): a user suggests a category, optionally with names; the admin chooses PRIVATE or GLOBAL; the admin fills in the stats.
+- **Flow 2, self-service upload:** a signed-in user uploads a whole CSV of cards (with images) and gets a **private** deck of their own at once, no admin involved. They can then
+  raise a "make it global" request (type `PROMOTE`); the admin approves (the deck becomes PUBLIC, the owner keeps ownership) or rejects with a note (it stays private).
+
+### One import pipeline (`DeckImportService`), used twice
+CSV text + a **stat mapping** + optional images -> validated cards -> a deck. Flow 2 uses the user's own mapping; the admin import of Flow 1 uses the mapping of the built-in Wrestling deck
+(its six stats, copied from `deck_stats`, with tighter ranges). The same code parses the CSV, checks every cell, resolves and re-encodes images and writes the deck.
+- **Upload** `POST /api/decks/import` (multipart): `csv`, optional `images` (one ZIP, or several image files), `mapping` (JSON), `name`, `description`; `?dryRun=true` validates and
+  returns every row error plus the parsed cards without saving. Template: `GET /api/decks/import/template` (the Wrestling schema as CSV + mapping).
+- **Mapping:** per stat column: `label`, `unit`, `higherWins`, `displayFormat` (PLAIN / WITH_UNIT / FEET_INCHES). The CSV needs `name`; optional `image` (an uploaded file name or an
+  https URL) and `brand`; every other mapped column is a stat. At most 8 stats. Whole-number columns are INT, the others DECIMAL (at most 2 decimals), found from the data.
+- **Rules:** 8-100 cards per user deck, unique names, numbers parse and are within +-1,000,000, ranks unique when a stat `rank` exists. Limits per user: 5 decks, 10 uploads and
+  30 previews per hour. Sizes: CSV 1 MB, ZIP 30 MB uncompressed, 2 MB per image, 100 images.
+- **Images:** URLs are **never fetched** by the server (no SSRF); an https URL in the CSV is stored as given. Uploaded files are identified by their real content (magic bytes), decoded,
+  **re-encoded** (EXIF and anything hidden is dropped) and scaled to at most 800 px, then kept by an `ImageStore` (interface; default Postgres `bytea`, served at the unguessable
+  `GET /api/images/{uuid}` with long cache headers; swappable for S3/R2). ZIPs: entry-count and total-size limits, no path traversal (only the base name is used), non-images ignored.
+- **Ownership:** the owner reads, replaces and deletes their private decks (`GET /api/decks/mine`, `PUT /api/decks/{id}/import`, `PATCH`, `DELETE`); an admin can read any deck; `GET /api/decks`
+  lists public decks plus your own. A game can be created with a deck its creator owns even if it is private; everybody seated in that game reads the deck's cards (and images) for the length of
+  the game. Nobody else can read a private deck. A PUBLIC deck cannot be edited (copy it with `POST /api/decks/{id}/copy`), so a promotion review is never bypassed; a deck with an open promotion
+  request cannot be edited either.
+- **Promotion:** `POST /api/decks/{id}/request-global` (owner, one open request per deck) creates a `deck_request` of type `PROMOTE` for that deck; the admin queue lists both types, the detail view shows the
+  deck with cards and images, approve = PUBLIC, reject = stays private with the note. The same email notification goes out for both types. The owner can withdraw a pending request.
+
+### Stages
+1. Plan, requests, admin, email (`40d4176`). 2a. Import and publish for requested decks (`20a0888`, fixed Wrestling schema).
+2. The generic pipeline, images, user upload + my decks + promotion, admin import through the same pipeline (done). 3. Whatever is left: stage 2b, generated stats, still only after the owner confirms (`StatGenerator` is the interface, there is no implementation).

@@ -14,6 +14,7 @@ import java.util.UUID;
 @Accessors(fluent = true)
 public class DeckRequest {
     private final UUID id;
+    private final DeckRequestType type;            // CATEGORY unless the owner asks to make an existing deck global
     private final UUID requesterId;
     private final String requesterUsername;         // joined from players (null when not loaded or the account was deleted)
     private final String category;

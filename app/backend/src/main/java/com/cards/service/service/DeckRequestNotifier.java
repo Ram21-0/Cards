@@ -67,13 +67,15 @@ public class DeckRequestNotifier {
     Email compose(DeckRequest r) {
         String link = frontendBaseUrl + "/#/admin/requests/" + r.id();
         String who = r.requesterUsername() == null ? "(unknown)" : r.requesterUsername();
-        String subject = "New deck request: " + r.category();
-        String text = "A new deck was requested.\n\nCategory: " + r.category() + "\nRequested by: " + who
-                + "\nSuggested names: " + r.names().size() + "\n\nReview it: " + link + "\n";
-        String html = "<p>A new deck was requested.</p><ul>"
-                + "<li><b>Category:</b> " + HtmlUtils.htmlEscape(r.category()) + "</li>"
+        boolean promotion = r.type() == com.cards.common.DeckRequestType.PROMOTE;
+        String intro = promotion ? "The owner of a private deck asks to make it global." : "A new deck was requested.";
+        String subject = (promotion ? "Make deck global: " : "New deck request: ") + r.category();
+        String text = intro + "\n\n" + (promotion ? "Deck: " : "Category: ") + r.category() + "\nRequested by: " + who
+                + (promotion ? "\nCards: " : "\nSuggested names: ") + r.names().size() + "\n\nReview it: " + link + "\n";
+        String html = "<p>" + intro + "</p><ul>"
+                + "<li><b>" + (promotion ? "Deck:" : "Category:") + "</b> " + HtmlUtils.htmlEscape(r.category()) + "</li>"
                 + "<li><b>Requested by:</b> " + HtmlUtils.htmlEscape(who) + "</li>"
-                + "<li><b>Suggested names:</b> " + r.names().size() + "</li></ul>"
+                + "<li><b>" + (promotion ? "Cards:" : "Suggested names:") + "</b> " + r.names().size() + "</li></ul>"
                 + "<p><a href=\"" + HtmlUtils.htmlEscape(link) + "\">Review the request</a></p>";
         return new Email(recipients, subject, html, text);
     }
