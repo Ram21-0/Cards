@@ -1,5 +1,6 @@
 package com.cards.service.controller;
 
+import com.cards.admin.AdminAccess;
 import com.cards.common.Deck;
 import com.cards.common.Game;
 import com.cards.common.GameStatus;
@@ -68,6 +69,7 @@ class AuthWebTest {
     @MockitoBean GameService games;
     @MockitoBean LiveGameService live;
     @MockitoBean RateLimiter rateLimiter;
+    @MockitoBean AdminAccess adminAccess;
 
     @BeforeEach
     void knownSessions() {
@@ -94,6 +96,13 @@ class AuthWebTest {
                 .andExpect(jsonPath("$.avatarUrl").value("https://pic"))
                 .andExpect(jsonPath("$.email").value("ann@example.com"))
                 .andExpect(jsonPath("$.needsUsername").value(false));
+    }
+
+    @Test
+    void meSaysWhetherThePlayerIsAnAdmin() throws Exception {
+        mvc.perform(get("/api/me").cookie(GOOD)).andExpect(jsonPath("$.isAdmin").value(false));
+        when(adminAccess.isAdmin(ANN)).thenReturn(true);
+        mvc.perform(get("/api/me").cookie(GOOD)).andExpect(jsonPath("$.isAdmin").value(true));
     }
 
     @Test

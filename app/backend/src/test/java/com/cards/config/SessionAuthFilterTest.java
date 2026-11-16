@@ -12,7 +12,8 @@ class SessionAuthFilterTest {
     void protectsTheAccountGameCreationAndJoinPaths() {
         for (String path : new String[]{"/api/me", "/api/auth/logout", "/api/games", "/api/games/K7Q2XM/join", "/api/games/k7q2xm/join",
                 "/api/games/K7Q2XM/cpu", "/api/games/K7Q2XM/leave", "/api/games/K7Q2XM/start", "/api/games/K7Q2XM/call",
-                "/api/games/K7Q2XM/choose", "/api/games/K7Q2XM/seats/2"}) {
+                "/api/games/K7Q2XM/choose", "/api/games/K7Q2XM/options", "/api/games/K7Q2XM/seats/2",
+                "/api/deck-requests", "/api/admin/deck-requests", "/api/admin/deck-requests/abc/approve"}) {
             assertTrue(SessionAuthFilter.requiresHeader(path), path);
         }
     }

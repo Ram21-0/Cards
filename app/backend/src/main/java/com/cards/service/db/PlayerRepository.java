@@ -51,6 +51,11 @@ public class PlayerRepository {
                 PLAYER, username, "dev:" + username, username).stream().findFirst();
     }
 
+    /** Development login only ({@code ?admin=true}): gives the dev account the fixed dev admin email. */
+    public Optional<Player> updateEmail(UUID id, String email) {
+        return jdbc.query("update players set email = ? where id = ? returning *", PLAYER, email, id).stream().findFirst();
+    }
+
     /** Sets the username unless someone else has it. Empty = taken. */
     public Optional<Player> updateUsername(UUID id, String username) {
         return jdbc.query("""

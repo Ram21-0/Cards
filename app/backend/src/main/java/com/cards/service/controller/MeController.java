@@ -1,5 +1,6 @@
 package com.cards.service.controller;
 
+import com.cards.admin.AdminAccess;
 import com.cards.common.Player;
 import com.cards.config.SessionCookies;
 import com.cards.service.controller.dto.MeResponse;
@@ -25,15 +26,17 @@ public class MeController {
 
     private final AuthService auth;
     private final SessionCookies cookies;
+    private final AdminAccess admin;
 
     @GetMapping
     public MeResponse me(@AuthenticationPrincipal Player me) {
-        return MeResponse.from(me);
+        return MeResponse.from(me, admin.isAdmin(me));
     }
 
     @PutMapping
     public MeResponse setUsername(@AuthenticationPrincipal Player me, @RequestBody UsernameRequest request) {
-        return MeResponse.from(auth.setUsername(me.id(), request.username()));
+        Player updated = auth.setUsername(me.id(), request.username());
+        return MeResponse.from(updated, admin.isAdmin(updated));
     }
 
     /** Deletes the account: all sessions end, personal data is wiped. */

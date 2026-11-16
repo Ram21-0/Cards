@@ -29,7 +29,8 @@ public class SessionAuthFilter extends OncePerRequestFilter {
     private static final Pattern GAME_ACTION = Pattern.compile("^/api/games/[^/]+/(join|cpu|leave|start|call|choose|options|seats/[^/]+)$");
 
     static boolean requiresHeader(String path) {
-        return HEADER_PROTECTED.contains(path) || GAME_ACTION.matcher(path).matches();
+        return HEADER_PROTECTED.contains(path) || GAME_ACTION.matcher(path).matches()
+                || path.equals("/api/deck-requests") || path.startsWith("/api/deck-requests/") || path.startsWith("/api/admin/") || path.startsWith("/api/decks/");
     }
     private static final Set<String> SAFE_METHODS = Set.of("GET", "HEAD", "OPTIONS", "TRACE");
 

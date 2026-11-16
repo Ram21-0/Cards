@@ -1,5 +1,6 @@
 package com.cards.service.controller;
 
+import com.cards.admin.AdminAccess;
 import com.cards.config.SessionCookies;
 import com.cards.service.controller.dto.MeResponse;
 import com.cards.service.controller.dto.UsernameRequest;
@@ -11,6 +12,7 @@ import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
 /**
@@ -26,12 +28,13 @@ public class DevLoginController {
 
     private final AuthService auth;
     private final SessionCookies cookies;
+    private final AdminAccess admin;
 
     @PostMapping("/login")
-    public ResponseEntity<MeResponse> login(@RequestBody UsernameRequest request) {
-        AuthService.Login login = auth.devLogin(request.username());
+    public ResponseEntity<MeResponse> login(@RequestBody UsernameRequest request, @RequestParam(defaultValue = "false") boolean admin) {
+        AuthService.Login login = auth.devLogin(request.username(), admin);
         return ResponseEntity.ok()
                 .header(HttpHeaders.SET_COOKIE, cookies.create(login.session().token(), login.session().expiresAt()))
-                .body(MeResponse.from(login.player()));
+                .body(MeResponse.from(login.player(), this.admin.isAdmin(login.player())));
     }
 }

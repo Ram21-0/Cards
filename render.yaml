@@ -20,3 +20,11 @@ services:
         sync: false            # not secret, but environment-specific
       - key: FRONTEND_ORIGIN
         sync: false            # e.g. https://cards.onrender.com (exact origin, no trailing slash)
+      - key: ADMIN_EMAILS
+        sync: false            # comma-separated Google emails that are admins (empty = nobody)
+      - key: ADMIN_NOTIFY_TO
+        sync: false            # who is emailed about new deck requests (default: ADMIN_EMAILS)
+      - key: EMAIL_API_KEY
+        sync: false            # secret: Resend API key; without it (or EMAIL_FROM) mails are only logged
+      - key: EMAIL_FROM
+        sync: false            # sender verified in Resend, e.g. Cards <cards@your-domain>

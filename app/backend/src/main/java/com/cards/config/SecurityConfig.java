@@ -1,10 +1,13 @@
 package com.cards.config;
 
+import com.cards.admin.AdminAccess;
+import com.cards.common.Player;
 import com.cards.service.service.SessionService;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.http.HttpMethod;
+import org.springframework.security.authorization.AuthorizationDecision;
 import org.springframework.security.config.Customizer;
 import org.springframework.security.config.annotation.web.builders.HttpSecurity;
 import org.springframework.security.config.annotation.web.configurers.AbstractHttpConfigurer;
@@ -26,7 +29,7 @@ import java.util.List;
 public class SecurityConfig {
 
     @Bean
-    public SecurityFilterChain securityFilterChain(HttpSecurity http, SessionService sessions, SessionCookies cookies) throws Exception {
+    public SecurityFilterChain securityFilterChain(HttpSecurity http, SessionService sessions, SessionCookies cookies, AdminAccess adminAccess) throws Exception {
         http
                 .csrf(AbstractHttpConfigurer::disable)           // replaced by SameSite=Lax + the X-Requested-With rule (SessionAuthFilter)
                 .cors(Customizer.withDefaults())                 // uses the CorsConfigurationSource bean below
@@ -40,6 +43,14 @@ public class SecurityConfig {
                 .authorizeHttpRequests(a -> a
                         .requestMatchers(HttpMethod.OPTIONS, "/**").permitAll()
                         .requestMatchers("/api/me").authenticated()
+                        .requestMatchers("/api/deck-requests", "/api/deck-requests/**").authenticated()
+                        .requestMatchers(HttpMethod.GET, "/api/decks/mine").authenticated()
+                        .requestMatchers(HttpMethod.POST, "/api/decks/**").authenticated()
+                        .requestMatchers(HttpMethod.PUT, "/api/decks/**").authenticated()
+                        .requestMatchers(HttpMethod.PATCH, "/api/decks/**").authenticated()
+                        .requestMatchers(HttpMethod.DELETE, "/api/decks/**").authenticated()
+                        .requestMatchers("/api/admin/**").access((authentication, context) -> new AuthorizationDecision(
+                                authentication.get() instanceof SessionAuthentication session && session.getPrincipal() instanceof Player player && adminAccess.isAdmin(player)))   // anonymous -> 401, signed in but not an admin -> 403
                         .requestMatchers(HttpMethod.POST, "/api/games", "/api/games/*/join", "/api/games/*/cpu", "/api/games/*/leave",
                                 "/api/games/*/start", "/api/games/*/call", "/api/games/*/choose").authenticated()                      // reading a game (join-link preview) stays public
                         .requestMatchers(HttpMethod.DELETE, "/api/games/*/seats/*").authenticated()

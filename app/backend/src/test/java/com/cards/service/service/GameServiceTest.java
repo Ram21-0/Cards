@@ -92,7 +92,7 @@ class GameServiceTest {
         }
         verifyNoInteractions(games, decks);
         // the edges are fine
-        when(decks.get(DECK_ID)).thenReturn(deck(54));
+        when(decks.get(eq(DECK_ID), any())).thenReturn(deck(54));
         when(games.insertIfCodeFree(anyString(), any(), any(), anyInt(), any())).thenAnswer(i -> Optional.of(game(i.getArgument(0), 4, GameStatus.WAITING)));
         service.create(DECK_ID, 2, ANN, GameOptions.NONE);
         service.create(DECK_ID, 8, ANN, GameOptions.NONE);
@@ -100,7 +100,7 @@ class GameServiceTest {
 
     @Test
     void deckNeedsAtLeastOneCardPerPlayer() {
-        when(decks.get(DECK_ID)).thenReturn(deck(3));
+        when(decks.get(eq(DECK_ID), any())).thenReturn(deck(3));
         BadRequestException e = assertThrows(BadRequestException.class, () -> service.create(DECK_ID, 4, ANN, GameOptions.NONE));
         assertEquals("This deck has 3 cards; 4 players need at least 4", e.getMessage());
         verify(games, never()).insertIfCodeFree(anyString(), any(), any(), anyInt(), any());
@@ -108,7 +108,7 @@ class GameServiceTest {
 
     @Test
     void unknownOrPrivateDeckIsNotFound() {
-        when(decks.get(DECK_ID)).thenThrow(new NotFoundException("Deck not found"));
+        when(decks.get(eq(DECK_ID), any())).thenThrow(new NotFoundException("Deck not found"));
         assertThrows(NotFoundException.class, () -> service.create(DECK_ID, 4, ANN, GameOptions.NONE));
     }
 
@@ -121,7 +121,7 @@ class GameServiceTest {
 
     @Test
     void theSignedInHostIsTheGameHostAndTakesSeatOne() {
-        when(decks.get(DECK_ID)).thenReturn(deck(54));
+        when(decks.get(eq(DECK_ID), any())).thenReturn(deck(54));
         Game created = game("K7Q2XM", 4, GameStatus.WAITING);
         when(games.insertIfCodeFree(anyString(), eq(DECK_ID), eq(ANN.id()), eq(4), any())).thenReturn(Optional.of(created));
         List<SeatInfo> seats = List.of(seat(1, "ann"));
@@ -136,7 +136,7 @@ class GameServiceTest {
 
     @Test
     void theResultHoldOptionIsValidatedAndPassedOn() {
-        when(decks.get(DECK_ID)).thenReturn(deck(54));
+        when(decks.get(eq(DECK_ID), any())).thenReturn(deck(54));
         Game created = game("K7Q2XM", 4, GameStatus.WAITING);
         when(games.insertIfCodeFree(anyString(), eq(DECK_ID), eq(ANN.id()), eq(4), any())).thenReturn(Optional.of(created));
         when(games.findSeats(created.id())).thenReturn(List.of(seat(1, "ann")));
@@ -200,7 +200,7 @@ class GameServiceTest {
 
     @Test
     void retriesWithAnotherCodeOnCollision() {
-        when(decks.get(DECK_ID)).thenReturn(deck(54));
+        when(decks.get(eq(DECK_ID), any())).thenReturn(deck(54));
         when(games.insertIfCodeFree(anyString(), any(), any(), anyInt(), any()))
                 .thenReturn(Optional.empty())
                 .thenReturn(Optional.empty())
@@ -211,7 +211,7 @@ class GameServiceTest {
 
     @Test
     void givesUpWhenNoCodeIsFree() {
-        when(decks.get(DECK_ID)).thenReturn(deck(54));
+        when(decks.get(eq(DECK_ID), any())).thenReturn(deck(54));
         when(games.insertIfCodeFree(anyString(), any(), any(), anyInt(), any())).thenReturn(Optional.empty());
         assertThrows(IllegalStateException.class, () -> service.create(DECK_ID, 4, ANN, GameOptions.NONE));
     }
@@ -386,7 +386,7 @@ class GameServiceTest {
     // ------------------------------------------------------------ the rule settings (RULES.md §1)
 
     private GameSettings createdWith(GameOptions options) {
-        when(decks.get(DECK_ID)).thenReturn(deck(54));
+        when(decks.get(eq(DECK_ID), any())).thenReturn(deck(54));
         when(games.insertIfCodeFree(anyString(), any(), any(), anyInt(), any())).thenAnswer(i -> Optional.of(game(i.getArgument(0), 4, GameStatus.WAITING)));
         service.create(DECK_ID, 4, ANN, options);
         ArgumentCaptor<GameSettings> captured = ArgumentCaptor.forClass(GameSettings.class);

@@ -1,10 +1,13 @@
 package com.cards.service.controller;
 
+import com.cards.admin.AdminAccess;
 import com.cards.common.Deck;
+import com.cards.common.Player;
 import com.cards.service.controller.dto.CardResponse;
 import com.cards.service.controller.dto.DeckResponse;
 import com.cards.service.service.DeckService;
 import lombok.RequiredArgsConstructor;
+import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.RequestMapping;
@@ -19,20 +22,21 @@ import java.util.UUID;
 public class DeckController {
 
     private final DeckService decks;
+    private final AdminAccess admin;
 
     @GetMapping
-    public List<DeckResponse> list() {
-        return decks.listPublic().stream().map(DeckResponse::from).toList();
+    public List<DeckResponse> list(@AuthenticationPrincipal Player me) {
+        return decks.listFor(me).stream().map(DeckResponse::from).toList();
     }
 
     @GetMapping("/{id}")
-    public DeckResponse get(@PathVariable UUID id) {
-        return DeckResponse.from(decks.get(id));
+    public DeckResponse get(@PathVariable UUID id, @AuthenticationPrincipal Player me) {
+        return DeckResponse.from(decks.get(id, me, admin.isAdmin(me)));
     }
 
     @GetMapping("/{id}/cards")
-    public List<CardResponse> cards(@PathVariable UUID id) {
-        Deck deck = decks.get(id);
+    public List<CardResponse> cards(@PathVariable UUID id, @AuthenticationPrincipal Player me) {
+        Deck deck = decks.get(id, me, admin.isAdmin(me));
         return decks.cardsOf(deck).stream().map(c -> CardResponse.from(c, deck)).toList();
     }
 }

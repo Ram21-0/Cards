@@ -5,6 +5,10 @@ spring:
     name: cards-backend
   autoconfigure:
     exclude: org.springframework.boot.autoconfigure.security.servlet.UserDetailsServiceAutoConfiguration   # we authenticate with our own session tokens
+  servlet:
+    multipart:
+      max-file-size: 35MB                    # a deck upload: CSV + a ZIP of images (each image is limited to 2 MB, a ZIP to 30 MB unpacked)
+      max-request-size: 40MB
   config:
     # Per-environment, non-secret settings (APP_ENV, default "local"). Secrets come from .env.<APP_ENV> or real
     # environment variables — see config/DotEnvPostProcessor.
@@ -38,6 +42,17 @@ app:
   rate-limit:
     actions: 30                               # lobby/play requests per player ...
     window-seconds: 10                        # ... per this many seconds
+  admin:
+    emails: ${ADMIN_EMAILS:}                  # comma-separated Google emails that are admins (empty = nobody). Checked on every request, never stored.
+    notify-to: ${ADMIN_NOTIFY_TO:${ADMIN_EMAILS:}}   # who is mailed about new deck requests
+  email:
+    api-key: ${EMAIL_API_KEY:}                # Resend API key; with EMAIL_FROM set, mail is sent, otherwise it is only logged
+    from: ${EMAIL_FROM:}                      # e.g. "Cards <cards@your-domain>" (a sender verified in Resend)
+  deck-requests:
+    template-deck: Wrestling                  # the built-in deck whose six stat definitions a requested deck copies
+  limits:
+    api-body-bytes: 65536
+    admin-body-bytes: 2097152
   dev-login:
     enabled: false                            # POST /api/dev/login exists only where this is true (local/application.yml)
 

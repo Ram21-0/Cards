@@ -1,6 +1,7 @@
 package com.cards.service.controller;
 
 import com.cards.common.BadRequestException;
+import com.cards.admin.AdminAccess;
 import com.cards.config.SessionCookies;
 import com.cards.service.controller.dto.CredentialRequest;
 import com.cards.service.controller.dto.MeResponse;
@@ -23,6 +24,7 @@ public class AuthController {
 
     private final AuthService auth;
     private final SessionCookies cookies;
+    private final AdminAccess admin;
 
     /** Step 1 of Google sign-in: a one-time nonce to hand to Google (replay protection). */
     @PostMapping("/nonce")
@@ -39,7 +41,7 @@ public class AuthController {
         AuthService.Login login = auth.loginWithGoogle(request.credential());
         return ResponseEntity.ok()
                 .header(HttpHeaders.SET_COOKIE, cookies.create(login.session().token(), login.session().expiresAt()))
-                .body(MeResponse.from(login.player()));
+                .body(MeResponse.from(login.player(), admin.isAdmin(login.player())));
     }
 
     /** Ends the session and clears the cookie. Idempotent: signed-out callers get 204 too. */

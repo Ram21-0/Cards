@@ -1,0 +1,64 @@
+# Deck requests: users suggest a category (a deck) with a list of names; an admin approves it as a private or global deck.
+#   status  0 PENDING, 1 REJECTED, 2 APPROVED_PRIVATE, 3 APPROVED_GLOBAL   (DeckRequestStatus)
+# "Live" is published_at (set when the deck goes live), not a status. decks.live = false until then, so a deck that an approval created
+# is never listed or playable before it has stats.
+databaseChangeLog:
+
+  - changeSet:
+      id: 040-decks-live
+      author: cards
+      changes:
+        - addColumn:
+            tableName: decks
+            columns:
+              - column: { name: live, type: boolean, defaultValueBoolean: true, remarks: "false = created by an approved deck request, not playable until published", constraints: { nullable: false } }
+      rollback:
+        - dropColumn: { tableName: decks, columnName: live }
+
+  - changeSet:
+      id: 041-deck-requests
+      author: cards
+      changes:
+        - createTable:
+            tableName: deck_requests
+            columns:
+              - column: { name: id, type: uuid, defaultValueComputed: gen_random_uuid(), constraints: { primaryKey: true, primaryKeyName: deck_requests_pkey, nullable: false } }
+              - column: { name: requester_id, type: uuid, constraints: { nullable: false } }
+              - column: { name: category, type: text, constraints: { nullable: false } }
+              - column: { name: description, type: text }
+              - column: { name: names, type: jsonb, constraints: { nullable: false } }
+              - column: { name: status, type: smallint, defaultValueNumeric: 0, constraints: { nullable: false } }
+              - column: { name: admin_note, type: text }
+              - column: { name: resulting_deck_id, type: uuid }
+              - column: { name: created_at, type: timestamp with time zone, defaultValueComputed: now(), constraints: { nullable: false } }
+              - column: { name: decided_at, type: timestamp with time zone }
+              - column: { name: decided_by, type: uuid }
+              - column: { name: notified_at, type: timestamp with time zone }
+              - column: { name: published_at, type: timestamp with time zone }
+        - addForeignKeyConstraint:
+            constraintName: deck_requests_requester_fkey
+            baseTableName: deck_requests
+            baseColumnNames: requester_id
+            referencedTableName: players
+            referencedColumnNames: id
+            onDelete: CASCADE
+        - addForeignKeyConstraint:
+            constraintName: deck_requests_deck_fkey
+            baseTableName: deck_requests
+            baseColumnNames: resulting_deck_id
+            referencedTableName: decks
+            referencedColumnNames: id
+            onDelete: SET NULL
+        - addForeignKeyConstraint:
+            constraintName: deck_requests_decided_by_fkey
+            baseTableName: deck_requests
+            baseColumnNames: decided_by
+            referencedTableName: players
+            referencedColumnNames: id
+            onDelete: SET NULL
+        - sql: ALTER TABLE deck_requests ADD CONSTRAINT deck_requests_status_check CHECK (status IN (0, 1, 2, 3))
+        - sql: ALTER TABLE deck_requests ADD CONSTRAINT deck_requests_names_check CHECK (jsonb_typeof(names) = 'array')
+        - createIndex: { indexName: deck_requests_requester_idx, tableName: deck_requests, columns: [ { column: { name: requester_id } }, { column: { name: created_at } } ] }
+        - createIndex: { indexName: deck_requests_status_idx, tableName: deck_requests, columns: [ { column: { name: status } }, { column: { name: created_at } } ] }
+      rollback:
+        - dropTable: { tableName: deck_requests }
