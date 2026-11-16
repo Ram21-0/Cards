@@ -27,4 +27,5 @@ public class DeckRequest {
     private final UUID decidedBy;
     private final Instant notifiedAt;
     private final Instant publishedAt;              // set when the deck went live
+    private final int cardCount;                    // cards imported into the resulting deck so far
 }

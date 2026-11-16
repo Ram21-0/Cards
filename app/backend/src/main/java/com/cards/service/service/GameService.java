@@ -58,7 +58,7 @@ public class GameService {
 
         GameSettings settings = settingsFor(options);               // 400 when an override is out of range
 
-        Deck deck = decks.get(deckId);                              // 404 when unknown or private
+        Deck deck = decks.get(deckId, host);                        // 404 when unknown, not live, or private and not the host's
         int cardCount = deck.cardCount() == null ? 0 : deck.cardCount();
         if (cardCount < maxPlayers) {
             throw new BadRequestException("This deck has " + cardCount + " cards; " + maxPlayers + " players need at least " + maxPlayers);

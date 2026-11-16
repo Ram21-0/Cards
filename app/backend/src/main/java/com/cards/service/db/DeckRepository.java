@@ -60,6 +60,44 @@ public class DeckRepository {
                 UUID.class, name, description, Visibility.PRIVATE.dbVal(), ownerId);
     }
 
+    /** Public decks plus the player's own PRIVATE ones, live and with stats only. */
+    public List<Deck> findVisibleTo(UUID playerId) {
+        return jdbc.query(CARD_COUNT_SELECT + " where d.live and exists (select 1 from deck_stats s where s.deck_id = d.id)"
+                        + " and (d.visibility = ? or (d.visibility = ? and d.owner_id = ?)) order by d.name",
+                        DECK, Visibility.PUBLIC.dbVal(), Visibility.PRIVATE.dbVal(), playerId)
+                .stream().map(this::withStats).toList();
+    }
+
+    /** Is this player in a game that is being played or waiting with this deck? (Then they may read it even if it is private.) */
+    public boolean isSeatedWithDeck(UUID playerId, UUID deckId) {
+        return Boolean.TRUE.equals(jdbc.queryForObject("""
+                select exists (select 1 from game_players gp join games g on g.id = gp.game_id
+                               where g.deck_id = ? and gp.player_id = ? and g.status in (0, 1))""", Boolean.class, deckId, playerId));
+    }
+
+    /** The built-in deck whose stat definitions new decks copy (by name, platform-owned). */
+    public Optional<UUID> findTemplateId(String name) {
+        return jdbc.query("select id from decks where name = ? and owner_id is null order by created_at limit 1", (rs, i) -> rs.getObject("id", UUID.class), name)
+                .stream().findFirst();
+    }
+
+    public int statCount(UUID deckId) {
+        return jdbc.queryForObject("select count(*) from deck_stats where deck_id = ?", Integer.class, deckId);
+    }
+
+    /** Gives the deck the same stat definitions (keys, labels, units, strategies, order, formats) as the template deck. */
+    public void copyStats(UUID templateDeckId, UUID deckId) {
+        jdbc.update("""
+                insert into deck_stats (deck_id, key, label, unit, value_type, comparison_strategy, display_order, display_format)
+                select ?, key, label, unit, value_type, comparison_strategy, display_order, display_format from deck_stats where deck_id = ?""",
+                deckId, templateDeckId);
+    }
+
+    /** Goes live with the visibility the admin chose. */
+    public void publish(UUID deckId, Visibility visibility, java.time.Instant now) {
+        jdbc.update("update decks set visibility = ?, live = true, updated_at = ? where id = ?", visibility.dbVal(), java.sql.Timestamp.from(now), deckId);
+    }
+
     private Deck withStats(Deck deck) {
         List<StatDefinition> stats = jdbc.query(
                 "select * from deck_stats where deck_id = ? order by display_order, id", STAT, deck.id());

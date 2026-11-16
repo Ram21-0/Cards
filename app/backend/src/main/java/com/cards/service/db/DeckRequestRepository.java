@@ -22,7 +22,8 @@ import java.util.UUID;
 public class DeckRequestRepository {
 
     private static final String SELECT = """
-            select r.*, p.username as requester_username
+            select r.*, p.username as requester_username,
+                   (select count(*) from cards c where c.deck_id = r.resulting_deck_id) as card_count
             from deck_requests r left join players p on p.id = r.requester_id""";
     private static final int LIST_LIMIT = 200;
 
@@ -45,6 +46,7 @@ public class DeckRequestRepository {
                 .decidedBy(rs.getObject("decided_by", UUID.class))
                 .notifiedAt(instant(rs.getTimestamp("notified_at")))
                 .publishedAt(instant(rs.getTimestamp("published_at")))
+                .cardCount(rs.getInt("card_count"))
                 .build();
     }
 
@@ -115,6 +117,10 @@ public class DeckRequestRepository {
 
     public void markNotified(UUID id, Instant now) {
         jdbc.update("update deck_requests set notified_at = ? where id = ?", Timestamp.from(now), id);
+    }
+
+    public void markPublished(UUID id, Instant now) {
+        jdbc.update("update deck_requests set published_at = ? where id = ?", Timestamp.from(now), id);
     }
 
     /** PENDING -> a decision; false when the request was no longer pending (someone decided first). */

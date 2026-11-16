@@ -1,5 +1,6 @@
 package com.cards.service.db;
 
+import com.cards.deckimport.DeckCardImport;
 import com.cards.common.Card;
 import com.cards.common.Stat;
 import com.fasterxml.jackson.core.type.TypeReference;
@@ -25,6 +26,40 @@ public class CardRepository {
 
     public List<Card> findByDeck(UUID deckId) {
         return jdbc.query("select * from cards where deck_id = ? order by id", this::map, deckId);
+    }
+
+    public int countByDeck(UUID deckId) {
+        return jdbc.queryForObject("select count(*) from cards where deck_id = ?", Integer.class, deckId);
+    }
+
+    /** Replaces ALL cards of the deck with these (the stat import). The caller has validated them; stats are stored under the Wrestling keys. */
+    public void replaceAll(UUID deckId, List<DeckCardImport> imported) {
+        jdbc.update("delete from cards where deck_id = ?", deckId);
+        jdbc.batchUpdate("insert into cards (deck_id, name, stats, meta) values (?, ?, ?::jsonb, ?::jsonb)", imported, 100, (ps, c) -> {
+            ps.setObject(1, deckId);
+            ps.setString(2, c.name());
+            ps.setString(3, write(statsOf(c)));
+            ps.setString(4, write(c.brand() == null ? Map.of() : Map.of("brand", c.brand())));
+        });
+    }
+
+    private static Map<String, Object> statsOf(DeckCardImport c) {
+        Map<String, Object> stats = new java.util.LinkedHashMap<>();
+        stats.put("rank", c.rank());
+        stats.put("fight", c.fight());
+        stats.put("chest", c.chest());
+        stats.put("biceps", c.biceps());
+        stats.put("height", c.height());
+        stats.put("weight", c.weight());
+        return stats;
+    }
+
+    private String write(Object value) {
+        try {
+            return json.writeValueAsString(value);
+        } catch (com.fasterxml.jackson.core.JsonProcessingException e) {
+            throw new IllegalStateException(e);
+        }
     }
 
     private Card map(ResultSet rs, int rowNum) throws SQLException {

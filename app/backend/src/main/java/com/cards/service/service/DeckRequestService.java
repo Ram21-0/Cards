@@ -2,15 +2,21 @@ package com.cards.service.service;
 
 import com.cards.common.BadRequestException;
 import com.cards.common.ConflictException;
+import com.cards.common.Deck;
 import com.cards.common.DeckRequest;
 import com.cards.common.DeckRequestStatus;
 import com.cards.common.NotFoundException;
 import com.cards.common.Player;
+import com.cards.common.ServiceUnavailableException;
 import com.cards.common.TooManyRequestsException;
 import com.cards.common.Visibility;
+import com.cards.deckimport.DeckCardImport;
+import com.cards.deckimport.StatImportParser;
+import com.cards.deckimport.StatImportValidator;
+import com.cards.service.db.CardRepository;
 import com.cards.service.db.DeckRepository;
 import com.cards.service.db.DeckRequestRepository;
-import lombok.RequiredArgsConstructor;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.transaction.support.TransactionSynchronization;
@@ -27,7 +33,6 @@ import java.util.UUID;
 
 /** Deck requests: what users may submit, and what the admin does with them. */
 @Service
-@RequiredArgsConstructor
 public class DeckRequestService {
 
     public static final int MAX_PENDING_PER_USER = 3;
@@ -42,8 +47,20 @@ public class DeckRequestService {
 
     private final DeckRequestRepository requests;
     private final DeckRepository decks;
+    private final CardRepository cards;
     private final DeckRequestNotifier notifier;
     private final Clock clock;
+    private final String templateDeckName;
+
+    public DeckRequestService(DeckRequestRepository requests, DeckRepository decks, CardRepository cards, DeckRequestNotifier notifier, Clock clock,
+                              @Value("${app.deck-requests.template-deck:Wrestling}") String templateDeckName) {
+        this.requests = requests;
+        this.decks = decks;
+        this.cards = cards;
+        this.notifier = notifier;
+        this.clock = clock;
+        this.templateDeckName = templateDeckName;
+    }
 
     // ------------------------------------------------------------------------------------------ users
 
@@ -128,6 +145,61 @@ public class DeckRequestService {
         requirePending(r);
         if (!requests.decide(id, DeckRequestStatus.REJECTED, cleanNote, admin.id(), null, clock.instant())) throw new ConflictException("The request was decided meanwhile");
         return requests.findById(id).orElseThrow();
+    }
+
+    // ------------------------------------------------------------------------------------------ going live (stage 2a)
+
+    /** The imported cards of an approved request's deck, for the admin to check before publishing. */
+    @Transactional(readOnly = true)
+    public ImportedDeck importedCards(UUID id) {
+        DeckRequest r = get(id);
+        if (r.resultingDeckId() == null) throw new ConflictException("Approve the request first");
+        Deck deck = decks.findById(r.resultingDeckId()).orElseThrow(() -> new NotFoundException("Deck not found"));
+        return new ImportedDeck(deck, cards.findByDeck(deck.id()));
+    }
+
+    public record ImportedDeck(Deck deck, List<com.cards.common.Card> cards) {
+    }
+
+    /** CSV text (header row: name, rank, fight, chest, biceps, height, weight, brand) or already typed cards: replaces all cards of the deck. */
+    @Transactional
+    public DeckRequest importCsv(UUID id, String csv) {
+        return importStats(id, StatImportValidator.fromRows(StatImportParser.parseCsv(csv)));
+    }
+
+    @Transactional
+    public DeckRequest importCards(UUID id, List<DeckCardImport> imported) {
+        return importStats(id, StatImportValidator.fromCards(imported == null ? List.of() : imported));
+    }
+
+    private DeckRequest importStats(UUID id, List<DeckCardImport> validated) {
+        DeckRequest r = requests.findByIdForUpdate(id).orElseThrow(() -> new NotFoundException("Request not found"));
+        requireApprovedAndNotLive(r);
+        UUID deckId = r.resultingDeckId();
+        if (decks.statCount(deckId) == 0) {                                      // the six Wrestling stats: same keys, units and strategies
+            UUID template = decks.findTemplateId(templateDeckName).orElseThrow(() -> new ServiceUnavailableException("The template deck '" + templateDeckName + "' is missing"));
+            decks.copyStats(template, deckId);
+        }
+        cards.replaceAll(deckId, validated);
+        return requests.findById(id).orElseThrow();
+    }
+
+    /** Goes live: the deck gets the visibility the admin chose at approval and the request is marked published. Needs the imported cards. */
+    @Transactional
+    public DeckRequest publish(UUID id) {
+        DeckRequest r = requests.findByIdForUpdate(id).orElseThrow(() -> new NotFoundException("Request not found"));
+        requireApprovedAndNotLive(r);
+        if (r.cardCount() < StatImportValidator.MIN_CARDS || decks.statCount(r.resultingDeckId()) == 0) {
+            throw new ConflictException("Import the card stats first (at least " + StatImportValidator.MIN_CARDS + " cards)");
+        }
+        decks.publish(r.resultingDeckId(), r.status() == DeckRequestStatus.APPROVED_GLOBAL ? Visibility.PUBLIC : Visibility.PRIVATE, clock.instant());
+        requests.markPublished(id, clock.instant());
+        return requests.findById(id).orElseThrow();
+    }
+
+    private static void requireApprovedAndNotLive(DeckRequest r) {
+        if (!r.status().approved() || r.resultingDeckId() == null) throw new ConflictException("Approve the request first");
+        if (r.publishedAt() != null) throw new ConflictException("The deck is already live");
     }
 
     // ------------------------------------------------------------------------------------------ cleaning and validation

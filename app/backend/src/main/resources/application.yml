@@ -44,6 +44,8 @@ app:
   email:
     api-key: ${EMAIL_API_KEY:}                # Resend API key; with EMAIL_FROM set, mail is sent, otherwise it is only logged
     from: ${EMAIL_FROM:}                      # e.g. "Cards <cards@your-domain>" (a sender verified in Resend)
+  deck-requests:
+    template-deck: Wrestling                  # the built-in deck whose six stat definitions a requested deck copies
   limits:
     api-body-bytes: 65536
     admin-body-bytes: 2097152
