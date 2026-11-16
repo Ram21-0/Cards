@@ -9,6 +9,7 @@ import {
   fetchNonce, googleSignIn, fetchMe, updateMe, signOut, deleteAccount, devLogin,
 } from './api.js';
 import { offlineDeck } from './offline.js';
+import { createDecksUi } from './decksui.js';
 import { el } from './dom.js';
 
 const app = document.getElementById('app');
@@ -132,6 +133,16 @@ function goBack() {
   else nav(paths.menu(), { replace: true });
 }
 
+// Deck requests, My decks and the admin page (js/decksui.js); it gets only what app.js owns.
+const decksUi = createDecksUi({
+  show, screen, nav, goUp, toast,
+  getMe: () => me,
+  signIn: (path, opts) => signIn(path, opts),
+  chooseUsername: (path, opts) => chooseUsername(path, opts),
+  invalidateDeck: (id) => id && deckCache.delete(id),
+  refreshDecks: async () => { if (deck?.source === 'api') decks = await fetchDecks().catch(() => decks); },
+});
+
 function render() {
   const route = parseRoute(location.hash);
   const redirect = redirectFor(route, { hasGame: Boolean(game) });
@@ -148,6 +159,12 @@ function render() {
     case 'signin': return signInScreen();
     case 'username': return usernameScreen();
     case 'account': return account();
+    case 'requests': return decksUi.requestsScreen();
+    case 'my-decks': return decksUi.myDecksScreen();
+    case 'deck-new': return decksUi.newDeckScreen();
+    case 'deck-edit': return decksUi.editDeckScreen(route.params.id);
+    case 'admin-requests': return decksUi.adminListScreen();
+    case 'admin-request': return decksUi.adminRequestScreen(route.params.id);
     default: return menu();
   }
 }
@@ -253,6 +270,9 @@ function menu() {
     offlineNotice,
     el('button', { class: 'btn primary wide', onclick: startGame }, 'Play'),
     el('button', { class: 'btn wide', onclick: () => nav(paths.decks()) }, 'Gallery'),
+    deck.source === 'api' ? el('button', { class: 'btn wide', onclick: () => nav(paths.myDecks()) }, 'My decks') : '',
+    deck.source === 'api' ? el('button', { class: 'btn wide', onclick: () => nav(paths.requests()) }, 'Request a deck') : '',
+    me?.isAdmin ? el('button', { class: 'btn wide', onclick: () => nav(paths.adminRequests()) }, 'Admin: deck requests') : '',
     el('button', { class: 'btn wide', onclick: () => (me ? nav(paths.account()) : signIn()) }, me ? 'Account' : 'Sign in'),
     deckPicker,
     el('div', { class: 'row' }, el('span', {}, 'CPU difficulty'), seg),
@@ -296,7 +316,7 @@ function gallery() {
       el('button', { class: 'deck-tile', onclick: () => nav(paths.deck(d.id)) },
         el('h3', {}, d.name),
         d.description ? el('p', {}, d.description) : '',
-        el('div', { class: 'chips' }, el('span', { class: 'chip strong' }, `${d.cardCount} cards`), d.stats.map((s) => el('span', { class: 'chip' }, s.label))))))));
+        el('div', { class: 'chips' }, el('span', { class: 'chip strong' }, `${d.cardCount} cards`), d.visibility === 'PRIVATE' ? el('span', { class: 'chip' }, 'Private') : '', d.stats.map((s) => el('span', { class: 'chip' }, s.label))))))));
 }
 
 /** A full deck (stats + cards) by id; the offline deck has the id 'offline'. */
@@ -874,16 +894,18 @@ function devSignInForm() {
   const input = el('input', { class: 'field', type: 'text', placeholder: 'dev username', maxlength: '8', autocomplete: 'off', 'aria-label': 'Dev username' });
   const go = async () => {
     try {
-      me = await devLogin(input.value.trim());
+      me = await devLogin(input.value.trim(), { admin: admin.checked });
       welcome();
     } catch (e) {
       toast(e instanceof ApiError ? (e.status === 404 ? 'Dev sign-in is not enabled on this server' : e.message) : 'Could not reach the server');
     }
   };
+  const admin = el('input', { type: 'checkbox', 'aria-label': 'Sign in as admin' });
   input.addEventListener('keydown', (e) => e.key === 'Enter' && go());
   return el('div', { class: 'dev-login' },
     el('p', { class: 'hint' }, 'Local development only'),
     input,
+    el('label', { class: 'hint' }, admin, ' as admin'),
     el('button', { class: 'btn small', onclick: go }, 'Dev sign-in'));
 }
 

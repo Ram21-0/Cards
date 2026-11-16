@@ -19,7 +19,7 @@ export class ApiError extends Error {
   }
 }
 
-async function request(path, { method = 'GET', body, timeoutMs = 5000 } = {}) {
+async function request(path, { method = 'GET', body, form, text, timeoutMs = 5000 } = {}) {
   const ctl = new AbortController();
   const timer = setTimeout(() => ctl.abort(), timeoutMs);
   try {
@@ -31,8 +31,9 @@ async function request(path, { method = 'GET', body, timeoutMs = 5000 } = {}) {
         Accept: 'application/json',
         'X-Requested-With': 'cards',                // required by the backend on state-changing requests
         ...(body ? { 'Content-Type': 'application/json' } : {}),
+        ...(text != null ? { 'Content-Type': 'text/csv' } : {}),   // a FormData body sets its own multipart boundary
       },
-      body: body ? JSON.stringify(body) : undefined,
+      body: form ?? text ?? (body ? JSON.stringify(body) : undefined),
     });
     if (!res.ok) {
       const detail = await res.json().catch(() => null);
@@ -45,6 +46,9 @@ async function request(path, { method = 'GET', body, timeoutMs = 5000 } = {}) {
 }
 
 const getJson = (path) => request(path);
+
+/** Card images: `/api/images/<uuid>` (an upload) is relative to the API origin; https URLs and null pass through. */
+export const imageUrl = (img, base = API_BASE) => (img ? (img.startsWith('/') ? base + img : img) : null);
 
 /** Public decks: [{ id, name, description, visibility, cardCount, stats }]. */
 export const fetchDecks = () => getJson('/api/decks');
@@ -67,7 +71,7 @@ export function mapCard(c, stats) {
   return {
     id: c.id,
     name: c.name,
-    img: c.img ?? null,
+    img: imageUrl(c.img),
     brand: c.meta?.brand ?? null,
     stats: Object.fromEntries(stats
       .filter((s) => c.stats?.[s.key])
@@ -138,7 +142,8 @@ export const signOut = () => request('/api/auth/logout', { method: 'POST' });
 export const deleteAccount = () => request('/api/me', { method: 'DELETE' });
 
 /** Local development only: signs in without Google. The server answers 404 anywhere else. Resolves Me. */
-export const devLogin = (username) => request('/api/dev/login', { method: 'POST', body: { username } });
+export const devLogin = (username, { admin = false } = {}) =>
+  request(`/api/dev/login${admin ? '?admin=true' : ''}`, { method: 'POST', body: { username } });
 
 // ---- Lobby actions (see app/backend/LIVE.md). Each resolves the updated game body, like getGame. ----
 const gamePath = (code) => `/api/games/${encodeURIComponent(code)}`;
@@ -165,3 +170,75 @@ export const callStat = (code, stat) => request(`${gamePath(code)}/call`, { meth
 
 /** CHOOSE: put a card from `view.ownHand` in play (`cardId` is its id). */
 export const chooseCard = (code, cardId) => request(`${gamePath(code)}/choose`, { method: 'POST', body: { cardId } });
+
+// ---- Deck requests and decks of your own (docs/deck-requests/API.md). Me also carries `isAdmin`. ----
+const enc = encodeURIComponent;
+
+/** Your requests, newest first. Each: { id, type: CATEGORY|PROMOTE, category, description, names, status, adminNote, createdAt, decidedAt, live, deckId }. */
+export const fetchMyRequests = () => request('/api/deck-requests');
+
+/** Asks for a new deck category. ApiError 400 (validation) / 409 (3 pending) / 429 (5 a day). */
+export const createDeckRequest = ({ category, description, names }) =>
+  request('/api/deck-requests', { method: 'POST', body: { category, description, names } });
+
+/** Withdraws one of your own requests while it is PENDING (resolves null). */
+export const withdrawRequest = (id) => request(`/api/deck-requests/${enc(id)}`, { method: 'DELETE' });
+
+/** Your decks: [{ id, name, description, visibility, live, cardCount, stats, promotion }]. */
+export const fetchMyDecks = () => request('/api/decks/mine');
+
+/** { csv, mapping: { stats }, notes } for a CSV that validates. */
+export const fetchImportTemplate = () => request('/api/decks/import/template');
+
+/** The multipart body of an upload. images: File[] (one ZIP and/or image files). */
+export function importForm({ csv, mapping, images = [], name, description }) {
+  const f = new FormData();
+  f.append('csv', csv);
+  f.append('mapping', JSON.stringify(mapping));
+  for (const img of images) f.append('images', img);
+  if (name != null && name !== '') f.append('name', name);
+  if (description != null && description !== '') f.append('description', description);
+  return f;
+}
+const UPLOAD_MS = 120000;
+
+/** Checks an upload and saves nothing: { valid, errorCount, errors, stats, cards }. */
+export const previewDeck = (input) =>
+  request('/api/decks/import?dryRun=true', { method: 'POST', form: importForm(input), timeoutMs: UPLOAD_MS });
+
+/** Saves a new private deck (201, the Deck). ApiError 400 (first problems) / 409 (5 decks) / 429 / 413. */
+export const importDeck = (input) =>
+  request('/api/decks/import', { method: 'POST', form: importForm(input), timeoutMs: UPLOAD_MS });
+
+/** Replaces the stats and cards of one of your decks. */
+export const replaceDeck = (id, input) =>
+  request(`/api/decks/${enc(id)}/import`, { method: 'PUT', form: importForm(input), timeoutMs: UPLOAD_MS });
+
+/** Renames / re-describes a deck; a field left out stays. */
+export const patchDeck = (id, fields) => request(`/api/decks/${enc(id)}`, { method: 'PATCH', body: fields });
+
+/** Deletes a deck (409 when it was ever used in a game). */
+export const deleteDeck = (id) => request(`/api/decks/${enc(id)}`, { method: 'DELETE' });
+
+/** A private copy of any deck you can see. */
+export const copyDeck = (id, name) => request(`/api/decks/${enc(id)}/copy`, { method: 'POST', body: name ? { name } : {} });
+
+/** Asks for a private deck to become public: a PROMOTE request. */
+export const requestGlobal = (id) => request(`/api/decks/${enc(id)}/request-global`, { method: 'POST' });
+
+// ---- Admin (401 signed out, 403 not an admin) ----
+
+/** status: PENDING | REJECTED | APPROVED_PRIVATE | APPROVED_GLOBAL | ALL. Pending first, then newest. */
+export const adminListRequests = (status = 'ALL') => request(`/api/admin/deck-requests?status=${enc(status)}`);
+export const adminGetRequest = (id) => request(`/api/admin/deck-requests/${enc(id)}`);
+/** Edits a pending request: any of { category, description, names }. */
+export const adminEditRequest = (id, fields) => request(`/api/admin/deck-requests/${enc(id)}`, { method: 'PATCH', body: fields });
+/** visibility: PRIVATE | PUBLIC (a PROMOTE request accepts only PUBLIC). */
+export const adminApprove = (id, { visibility, note }) =>
+  request(`/api/admin/deck-requests/${enc(id)}/approve`, { method: 'POST', body: { visibility, note: note || undefined } });
+export const adminReject = (id, note) => request(`/api/admin/deck-requests/${enc(id)}/reject`, { method: 'POST', body: { note } });
+/** Replaces the cards of the approved request's deck from CSV text. 400 lists the row problems. */
+export const adminPutStats = (id, csvText) =>
+  request(`/api/admin/deck-requests/${enc(id)}/stats`, { method: 'PUT', text: csvText, timeoutMs: UPLOAD_MS });
+export const adminCards = (id) => request(`/api/admin/deck-requests/${enc(id)}/cards`);
+export const adminPublish = (id) => request(`/api/admin/deck-requests/${enc(id)}/publish`, { method: 'POST' });

@@ -5,6 +5,9 @@
 //   #/deck/<id>   one deck                #/deck/<id>/card/<n>  one card of a deck
 //   #/lobby/<code> game lobby             #/play                a solo game in progress
 //   #/signin  #/username  #/account       sign-in flow and account
+//   #/requests                            ask for a deck category / your requests
+//   #/my-decks  #/my-decks/new  #/my-decks/<id>/edit   decks of your own
+//   #/admin/requests  #/admin/requests/<id>            admin review (admins only)
 
 /** Hash or path -> { name, params, path }. Unknown paths fall back to the menu. */
 export function parseRoute(hash) {
@@ -31,6 +34,17 @@ export function parseRoute(hash) {
       const code = seg[1].toUpperCase();
       return { name: 'lobby', params: { code }, path: `/lobby/${encodeURIComponent(code)}` };
     }
+    case 'requests': case 'my-decks': {
+      if (seg[0] === 'my-decks' && seg[1] === 'new' && seg.length === 2) return { name: 'deck-new', params: {}, path: '/my-decks/new' };
+      if (seg[0] === 'my-decks' && seg.length === 3 && seg[2] === 'edit') return { name: 'deck-edit', params: { id: seg[1] }, path: `/my-decks/${encodeURIComponent(seg[1])}/edit` };
+      return seg.length === 1 ? { name: seg[0], params: {}, path: `/${seg[0]}` } : menu;
+    }
+    case 'admin': {
+      if (seg[1] !== 'requests') return menu;
+      if (seg.length === 2) return { name: 'admin-requests', params: {}, path: '/admin/requests' };
+      if (seg.length === 3) return { name: 'admin-request', params: { id: seg[2] }, path: `/admin/requests/${encodeURIComponent(seg[2])}` };
+      return menu;
+    }
     case 'play': case 'signin': case 'username': case 'account':
       return seg.length === 1 ? { name: seg[0], params: {}, path: `/${seg[0]}` } : menu;
     default: return menu;
@@ -50,6 +64,12 @@ export const paths = {
   signin: () => '/signin',
   username: () => '/username',
   account: () => '/account',
+  requests: () => '/requests',
+  myDecks: () => '/my-decks',
+  newDeck: () => '/my-decks/new',
+  editDeck: (id) => `/my-decks/${encodeURIComponent(id)}/edit`,
+  adminRequests: () => '/admin/requests',
+  adminRequest: (id) => `/admin/requests/${encodeURIComponent(id)}`,
 };
 
 /**
